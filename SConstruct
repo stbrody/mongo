@@ -234,6 +234,8 @@ add_option("mongod-concurrency-level", "Concurrency level, \"global\" or \"db\""
 add_option('client-dist-basename', "Name of the client source archive.", 1, False,
            default='mongo-cxx-driver')
 
+add_option( "sasl", "Compile and link in SASL library", 0, False ) # Should probably be True (makes it recompile from scratch if option changes)
+
 # don't run configure if user calls --help
 if GetOption('help'):
     Return()
@@ -286,6 +288,8 @@ asio = has_option( "asio" )
 usePCH = has_option( "usePCH" )
 
 justClientLib = (COMMAND_LINE_TARGETS == ['mongoclient'])
+
+useSasl = has_option( "sasl" )
 
 env = Environment( BUILD_DIR=variantDir,
                    CLIENT_ARCHIVE='${CLIENT_DIST_BASENAME}${DIST_ARCHIVE_SUFFIX}',
@@ -727,6 +731,9 @@ if nix:
 
     if has_option( "gdbserver" ):
         env.Append( CPPDEFINES=["USE_GDBSERVER"] )
+
+    if useSasl:
+        env.Append( LINKFLAGS="-lgsasl" )
 
     # pre-compiled headers
     if usePCH and 'Gch' in dir( env ):
