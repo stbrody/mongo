@@ -29,8 +29,31 @@ namespace mongo {
         SaslInfo();
         ~SaslInfo();
 
-    private:
+        static int serverCallback (Gsasl * ctx, Gsasl_session * sctx, Gsasl_property prop);
+
+        //private:
         Gsasl* _context;
+    };
+
+    extern SaslInfo saslInfo;
+
+    class SaslSession : boost::noncopyable {
+    public:
+        //        SaslSession() {}
+        //        ~SaslSession() {}
+
+        static void serverBegin(const string& dbname,
+                                const char* authMechanism,
+                                string username,
+                                const char* saslData,
+                                string& saslResponse,
+                                string& errmsg);
+
+        static void serverContinue(const char* saslData, string& saslResponse, string& errmsg);
+
+        Gsasl_session* _session;
+
+        static boost::thread_specific_ptr<SaslSession> gsaslSession;
     };
 
 } // namespace mongo

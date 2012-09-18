@@ -351,6 +351,44 @@ namespace mongo {
         return JS_TRUE;
     }
 
+    JSBool mongo_sasl_auth(JSContext *cx, JSObject *obj, uintN argc, jsval *argv, jsval *rval) {
+        try {
+            smuassert( cx , "mongo_auth needs 3 args" , argc == 3 );
+            shared_ptr< DBClientWithCommands > * connHolder = (shared_ptr< DBClientWithCommands >*)JS_GetPrivate( cx , obj );
+            smuassert( cx ,  "no connection!" , connHolder && connHolder->get() );
+            DBClientWithCommands *conn = connHolder->get();
+
+            Convertor c( cx );
+
+            string db = c.toString( argv[0] );
+            string username = c.toString( argv[1] );
+            string password = c.toString( argv[2] );
+            string errmsg = "";
+
+            if ( ! conn->saslAuth( db, username, password, errmsg ) ) {
+                JS_ReportError( cx, errmsg.c_str() );
+                return JS_FALSE;
+            }
+        }
+        catch ( const AssertionException& e ) {
+            if ( ! JS_IsExceptionPending( cx ) ) {
+                JS_ReportError( cx, e.what() );
+            }
+            return JS_FALSE;
+        }
+        catch ( const SocketException& e ) {
+            if ( ! JS_IsExceptionPending( cx ) ) {
+                JS_ReportError( cx, e.toString().c_str() );
+            }
+            return JS_FALSE;
+        }
+        catch ( const std::exception& e ) {
+            log() << "unhandled exception: " << e.what() << ", throwing Fatal Assertion" << endl;
+            fassertFailed( 16440 );
+        }
+        return JS_TRUE;
+    }
+
     JSBool mongo_logout(JSContext *context, JSObject *obj, uintN argc, jsval *argv, jsval *rval) {
         try {
             smuassert(context, "mongo_logout needs 1 arg" , argc == 1);
@@ -582,6 +620,7 @@ namespace mongo {
 
     JSFunctionSpec mongo_functions[] = {
         { "auth" , mongo_auth , 0 , JSPROP_READONLY | JSPROP_PERMANENT, 0 } ,
+        { "saslAuth" , mongo_sasl_auth , 0 , JSPROP_READONLY | JSPROP_PERMANENT, 0 } ,
         { "logout", mongo_logout, 0, JSPROP_READONLY | JSPROP_PERMANENT, 0 },
         { "find" , mongo_find , 0 , JSPROP_READONLY | JSPROP_PERMANENT, 0 } ,
         { "update" , mongo_update , 0 , JSPROP_READONLY | JSPROP_PERMANENT, 0 } ,

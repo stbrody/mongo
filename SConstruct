@@ -289,7 +289,7 @@ usePCH = has_option( "usePCH" )
 
 justClientLib = (COMMAND_LINE_TARGETS == ['mongoclient'])
 
-useSasl = has_option( "sasl" )
+useSasl = True # TODO: has_option( "sasl" )
 
 env = Environment( BUILD_DIR=variantDir,
                    CLIENT_ARCHIVE='${CLIENT_DIST_BASENAME}${DIST_ARCHIVE_SUFFIX}',

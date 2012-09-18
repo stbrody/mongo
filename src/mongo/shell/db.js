@@ -149,6 +149,18 @@ DB.prototype.auth = function( username , pass ){
     return 1;
 }
 
+DB.prototype.saslAuth = function( username , pass ){
+    var result = 0;
+    try {
+        result = this.getMongo().saslAuth(this.getName(), username, pass);
+    }
+    catch (e) {
+        print(e);
+        return 0;
+    }
+    return 1;
+}
+
 /**
   Create a new collection in the database.  Normally, collection creation is automatic.  You would
    use this function if you wish to specify special options on creation.

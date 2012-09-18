@@ -154,6 +154,7 @@ coreServerFiles = [ "util/version.cpp",
                     "db/indexkey.cpp",
                     "db/stats/counters.cpp",
                     "db/stats/service_stats.cpp",
+                    "db/sasl.cpp",
                     ]
 
 env.StaticLibrary('ntservice', ['util/ntservice.cpp'])

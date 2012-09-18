@@ -586,6 +586,8 @@ namespace mongo {
         */
         virtual bool auth(const string &dbname, const string &username, const string &pwd, string& errmsg, bool digestPassword = true, Auth::Level * level = NULL);
 
+        virtual bool saslAuth(const string &dbname, const string &username, const string &pwd, string& errmsg, Auth::Level * level = NULL);
+
         /**
          * Logs out the connection for the given database.
          *
@@ -1077,6 +1079,8 @@ namespace mongo {
         }
 
         virtual bool auth(const string &dbname, const string &username, const string &pwd, string& errmsg, bool digestPassword = true, Auth::Level* level=NULL);
+
+        virtual bool saslAuth(const string &dbname, const string &username, const string &pwd, string& errmsg, Auth::Level* level=NULL);
 
         virtual auto_ptr<DBClientCursor> query(const string &ns, Query query=Query(), int nToReturn = 0, int nToSkip = 0,
                                                const BSONObj *fieldsToReturn = 0, int queryOptions = 0 , int batchSize = 0 ) {

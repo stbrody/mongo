@@ -1,3 +1,4 @@
+
 // dbclient.cpp - connect to a Mongo database as a database, from C++
 
 /*    Copyright 2009 10gen Inc.
@@ -26,6 +27,7 @@
 #include "mongo/db/json.h"
 #include "mongo/db/namespace-inl.h"
 #include "mongo/db/namespacestring.h"
+#include "mongo/db/sasl.h"
 #include "mongo/s/util.h"
 #include "mongo/util/md5.hpp"
 
@@ -652,6 +654,10 @@ namespace mongo {
         }
 
         return DBClientBase::auth(dbname, username, password.c_str(), errmsg, false, level);
+    }
+
+    bool DBClientConnection::saslAuth(const string &dbname, const string &username, const string &password, string& errmsg, Auth::Level* level) {
+        return DBClientBase::saslAuth(dbname, username, password.c_str(), errmsg, level);
     }
 
     /** query N objects from the database into an array.  makes sense mostly when you want a small number of results.  if a huge number, use 
