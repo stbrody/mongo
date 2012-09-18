@@ -43,13 +43,13 @@ namespace mongo {
         //        ~SaslSession() {}
 
         static void serverBegin(const string& dbname,
-                                const char* authMechanism,
-                                string username,
-                                const char* saslData,
+                                const string& authMechanism,
+                                const string& username,
+                                const string& saslData,
                                 string& saslResponse,
                                 string& errmsg);
 
-        static void serverContinue(const char* saslData, string& saslResponse, string& errmsg);
+        static void serverContinue(const string& saslData, string& saslResponse, string& errmsg);
 
         Gsasl_session* _session;
 

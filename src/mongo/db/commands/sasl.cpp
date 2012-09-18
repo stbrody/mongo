@@ -20,11 +20,12 @@ namespace mongo {
         }
         CmdSaslAuthBegin() : Command("saslBegin") {}
         bool run(const string& dbname, BSONObj& cmdObj, int, string& errmsg, BSONObjBuilder& result, bool fromRepl) {
-            const char* authMechanism = cmdObj["mechanism"].String().c_str();
+            const string& authMechanism = cmdObj["mechanism"].String();
+            log() << "received mechanism: " << authMechanism << "." << endl;
 
-            string username = cmdObj["username"].String(); // TODO: get username from SASL
+            const string& username = cmdObj["username"].String(); // TODO: get username from SASL
 
-            const char* saslData = cmdObj["saslData"].String().c_str();
+            const string& saslData = cmdObj["saslData"].String();
 
             string saslResponse;
             try {
@@ -52,7 +53,7 @@ namespace mongo {
         CmdSaslAuthContinue() : Command("saslContinue") {}
         bool run(const string& dbname, BSONObj& cmdObj, int, string& errmsg, BSONObjBuilder& result, bool fromRepl) {
 
-            const char* saslData = cmdObj["saslData"].String().c_str();
+            const string& saslData = cmdObj["saslData"].String();
 
             string saslResponse;
             try {

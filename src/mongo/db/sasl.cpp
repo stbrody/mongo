@@ -44,7 +44,7 @@ namespace mongo {
         return rc;
     }
 
-    void SaslSession::serverContinue( const char* saslData, string& saslResponse, string& errmsg ) {
+    void SaslSession::serverContinue( const string& saslData, string& saslResponse, string& errmsg ) {
 
         SaslSession* sessionInfo = SaslSession::gsaslSession.get();
         if ( sessionInfo == NULL ) {
@@ -58,7 +58,7 @@ namespace mongo {
 
         log() << "session: " << session << endl;
         char* stuff;
-        int status = gsasl_step64( session, saslData, &stuff );
+        int status = gsasl_step64( session, saslData.c_str(), &stuff );
         uassert( 16444, str::stream() << "Second step of auth failed. Code: " << status << ", message: "
                  << gsasl_strerror(status), status == GSASL_OK || status == GSASL_NEEDS_MORE );
         log() << "Status of second server step: " << gsasl_strerror(status) << endl;
@@ -77,9 +77,9 @@ namespace mongo {
     }
 
     void SaslSession::serverBegin(const string& dbname,
-                                  const char* authMechanism,
-                                  string username,
-                                  const char* saslData,
+                                  const string& authMechanism,
+                                  const string& username,
+                                  const string& saslData,
                                   string& saslResponse,
                                   string& errmsg) {
 
@@ -90,7 +90,8 @@ namespace mongo {
         }
 
 
-        int status = gsasl_server_start( saslInfo._context, authMechanism, &sessionInfo->_session );
+        log() << "about to init server session with authMechanism: " << authMechanism << endl;
+        int status = gsasl_server_start( saslInfo._context, authMechanism.c_str(), &sessionInfo->_session );
         uassert( 16438, str::stream() << "Cannot initialize gsasl session. Code: " << status << ", message: "
                  << gsasl_strerror(status), status == GSASL_OK );
 
@@ -102,7 +103,7 @@ namespace mongo {
         log() << "Sasl data received: " << saslData << endl;
 
         char* stuff;
-        status = gsasl_step64( session, saslData, &stuff );
+        status = gsasl_step64( session, saslData.c_str(), &stuff );
         uassert( 16439, str::stream() << "First step of auth failed. Code: " << status << ", message: "
                  << gsasl_strerror(status), status == GSASL_OK || status == GSASL_NEEDS_MORE );
         log() << "Status of first server step: " << gsasl_strerror(status) << endl;
