@@ -27,9 +27,13 @@ namespace mongo {
     int SaslInfo::serverCallback (Gsasl * context, Gsasl_session * session, Gsasl_property property) {
         int rc = GSASL_NO_CALLBACK;
 
+        string password_text = "password";
+        const char* username = gsasl_property_fast (session, GSASL_AUTHID);
+        string password = DBClientWithCommands::createPasswordDigest( username , password_text );
+
         switch (property) {
         case GSASL_PASSWORD:
-            gsasl_property_set (session, property, "password"); // TODO: look up proper password
+            gsasl_property_set (session, property, password.c_str()); // TODO: look up proper password
             rc = GSASL_OK;
             break;
 
@@ -142,7 +146,7 @@ namespace mongo {
         beginCmd << "mechanism" << "CRAM-MD5";
         beginCmd << "username" << username;
 
-        gsasl_property_set( session, GSASL_AUTHID, password.c_str() ); // TODO: use a callback
+        gsasl_property_set( session, GSASL_AUTHID, username.c_str() ); // TODO: use a callback
         gsasl_property_set( session, GSASL_PASSWORD, password.c_str() ); // TODO: use a callback
 
         char* saslMessage;
