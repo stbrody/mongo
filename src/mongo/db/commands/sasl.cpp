@@ -18,6 +18,9 @@ namespace mongo {
         virtual bool slaveOk() const {
             return true;
         }
+        virtual bool requiresAuth() {
+            return false;
+        }
         CmdSaslAuthBegin() : Command("saslBegin") {}
         bool run(const string& dbname, BSONObj& cmdObj, int, string& errmsg, BSONObjBuilder& result, bool fromRepl) {
             const string& authMechanism = cmdObj["mechanism"].String();
@@ -49,6 +52,9 @@ namespace mongo {
         }
         virtual bool slaveOk() const {
             return true;
+        }
+        virtual bool requiresAuth() {
+            return false;
         }
         CmdSaslAuthContinue() : Command("saslContinue") {}
         bool run(const string& dbname, BSONObj& cmdObj, int, string& errmsg, BSONObjBuilder& result, bool fromRepl) {

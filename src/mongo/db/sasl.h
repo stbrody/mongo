@@ -54,6 +54,7 @@ namespace mongo {
         Gsasl_session* _session;
 
         static boost::thread_specific_ptr<SaslSession> gsaslSession;
+        string dbname;
     };
 
 } // namespace mongo
