@@ -21,7 +21,7 @@ namespace mongo {
 
         switch (property) {
         case GSASL_PASSWORD:
-            gsasl_property_set (session, property, password.c_str()); // TODO: look up proper password
+            gsasl_property_set (session, property, password.c_str());
             rc = GSASL_OK;
             break;
 
