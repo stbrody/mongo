@@ -52,6 +52,7 @@
 #include "../util/processinfo.h"
 #include "../util/ramlog.h"
 #include "mongo/util/elapsed_tracker.h"
+#include "mongo/db/fail_point_service.h"
 
 #include "shard.h"
 #include "d_logic.h"
@@ -784,6 +785,7 @@ namespace mongo {
         }
     } initialCloneCommand;
 
+    MONGO_FP_DECLARE(recvChunkCommitFailpoint);
 
     /**
      * this is the main entry for moveChunk
@@ -1155,6 +1157,11 @@ namespace mongo {
                     bool ok;
 
                     try{
+                        MONGO_FAIL_POINT_BLOCK(recvChunkCommitFailpoint,
+                                               blockRecvChunkCommitFailpoint) {
+                            sleepsecs(10);
+                            uasserted(16464, "Failpoint: _recvChunkCommit threw an exception");
+                        }
                         ok = connTo->get()->runCommand( "admin" ,
                                                         BSON( "_recvChunkCommit" << 1 ) ,
                                                         res );
@@ -1162,7 +1169,8 @@ namespace mongo {
                     catch( DBException& e ){
                         errmsg = str::stream() << "moveChunk could not contact to: shard " << toShard.getConnString() << " to commit transfer" << causedBy( e );
                         warning() << errmsg << endl;
-                        ok = false;
+                        return false;
+                        //ok = false;
                     }
 
                     connTo->done();
