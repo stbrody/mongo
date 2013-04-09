@@ -232,6 +232,7 @@ namespace {
         strcpy(authzid.get(), authzidString.c_str());
         scoped_ptr<char> password(new char[passwordString.length() + 1]);
         strcpy(password.get(), passwordString.c_str());
+
         defaults.mech = mechanism.get();
         defaults.authcid = authcid.get();
         defaults.authzid = authzid.get();
