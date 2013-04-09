@@ -28,6 +28,10 @@ def add_exe( v ):
 
 # ------    SOURCE FILE SETUP -----------
 
+env.StaticLibrary('mongoldap',
+                  [],
+                  SYSLIBDEPS=['ldap', 'sasl2'])
+
 env.StaticLibrary('foundation',
                   [ 'util/assert_util.cpp',
                     'util/concurrency/mutexdebugger.cpp',
@@ -208,6 +212,7 @@ env.StaticLibrary('mongocommon', commonFiles,
                            'foundation',
                            'mongohasher',
                            'md5',
+                           'mongoldap',
                            'processinfo',
                            'synchronization',
                            'stacktrace',

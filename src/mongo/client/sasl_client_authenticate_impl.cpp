@@ -28,6 +28,8 @@
 #include "mongo/util/net/hostandport.h"
 
 #include <gsasl.h>  // Must be included after "mongo/platform/cstdint.h" because of SERVER-8086.
+#include <ldap.h>
+#include <sasl/sasl.h>
 
 namespace mongo {
 namespace {
@@ -37,19 +39,7 @@ namespace {
 
     const char* const saslClientLogFieldName = "clientLogLevel";
 
-    Gsasl* _gsaslLibraryContext = NULL;
-
-    MONGO_INITIALIZER(SaslClientContext)(InitializerContext* context) {
-        fassert(16710, _gsaslLibraryContext == NULL);
-
-        if (!gsasl_check_version(GSASL_VERSION))
-            return Status(ErrorCodes::UnknownError, "Incompatible gsasl library.");
-
-        int rc = gsasl_init(&_gsaslLibraryContext);
-        if (GSASL_OK != rc)
-            return Status(ErrorCodes::UnknownError, gsasl_strerror(rc));
-        return Status::OK();
-    }
+    //Gsasl* _gsaslLibraryContext = NULL;
 
     /**
      * Configure "*session" as a client gsasl session for authenticating on the connection
@@ -138,11 +128,149 @@ namespace {
         return saslLogLevel;
     }
 
+    LDAP* ld = NULL;
+    MONGO_INITIALIZER(SaslClientContext)(InitializerContext* context) {
+        char* ldapuri;
+        char schemeString[] = "ldap";
+        char hostString[] = "54.234.147.246";
+        LDAPURLDesc url;
+        memset( &url, 0, sizeof(url));
+        url.lud_scheme = schemeString;
+        url.lud_host = hostString;
+        url.lud_port = 50000;
+        url.lud_scope = LDAP_SCOPE_DEFAULT;
+        ldapuri = ldap_url_desc2str( &url );
+        int rc = ldap_initialize(&ld, ldapuri);
+        if (rc != LDAP_SUCCESS) {
+            return Status(ErrorCodes::UnknownError, ldap_err2string(rc));
+        }
+        int protocol = LDAP_VERSION3;
+        if( ldap_set_option( ld, LDAP_OPT_PROTOCOL_VERSION, &protocol ) != LDAP_OPT_SUCCESS )
+        {
+            return Status(ErrorCodes::UnknownError, "Could not set LDAP_OPT_PROTOCOL_VERSION");
+        }
+        return Status::OK();
+    }
+
+    typedef struct lutil_sasl_defaults_s {
+        char *mech;
+        char *realm;
+        char *authcid;
+        char *passwd;
+        char *authzid;
+        char **resps;
+        int nresps;
+    } lutilSASLdefaults;
+
+    int ldap_sasl_interact_func(LDAP* ld, unsigned flags, void* defaultsVoidPtr, void* in) {
+        cout << "In my custom ldap_sasl_interact_func" << endl;
+        lutilSASLdefaults* defaults = (lutilSASLdefaults*) defaultsVoidPtr;
+        sasl_interact_t* interact = (sasl_interact_t*) in;
+        if( ld == NULL ) return LDAP_PARAM_ERROR;
+
+        while (interact->id != SASL_CB_LIST_END) {
+            switch( interact->id ) {
+            case SASL_CB_GETREALM:
+                cout << "Asked for realm" << endl;
+                interact->defresult = defaults->realm;
+                break;
+            case SASL_CB_AUTHNAME:
+                cout << "Asked for authcid (authname)" << endl;
+                interact->defresult = defaults->authcid;
+                break;
+            case SASL_CB_PASS:
+                cout << "Asked for password" << endl;
+                interact->defresult = defaults->passwd;
+                break;
+            case SASL_CB_USER:
+                cout << "Asked for authzid (user)" << endl;
+                interact->defresult = defaults->authzid;
+                break;
+            default:
+                cout << "WAS ASKED FOR SOMETHING ELSE: " << interact->id << endl;
+                break;
+            }
+
+            interact->result = (interact->defresult && *interact->defresult) ?
+                    interact->defresult : "";
+            interact->len = strlen(interact->defresult);
+
+            interact++;
+        }
+        return LDAP_SUCCESS;
+    }
+
     Status saslClientAuthenticateImpl(DBClientWithCommands* client,
                                       const BSONObj& saslParameters,
                                       void* sessionHook) {
+        lutilSASLdefaults defaults;
+        char mechanism[] = "DIGEST-MD5";
+        char* realm = NULL;
+        char authcid[] = "a";
+        char authzid[] = "a";
+        char passwd[] = "a";
+        defaults.mech = mechanism;
+        defaults.realm = realm;
+        defaults.authcid = authcid;
+        defaults.authzid = authzid;
+        defaults.passwd = passwd;
+        defaults.resps = NULL;
+        defaults.nresps = 0;
 
-        GsaslSession session;
+        int rc = ldap_sasl_interactive_bind_s( ld, NULL, mechanism, NULL,
+                                               NULL, 0, ldap_sasl_interact_func, (void*) &defaults );
+        if (rc != LDAP_SUCCESS) {
+            cout << "UHOH!!!!" << endl;
+            char *msg=NULL;
+            ldap_get_option( ld, LDAP_OPT_DIAGNOSTIC_MESSAGE, (void*)&msg);
+            if (msg)
+                cout << "diagnostic message: " << string(msg) << endl;
+            return Status(ErrorCodes::UnknownError, mongoutils::str::stream() << "ERROR! Code: " <<
+                          rc << ", message: " << ldap_err2string(rc));
+        }
+        return Status::OK();
+
+        /*
+        cout << "AAAAAAAAAAAAA" << endl;
+        const char* dn = NULL; // Docs say this should always be NULL for sasl
+        //const char* mechanism = LDAP_SASL_SIMPLE;
+        const char* mechanism = "DIGEST-MD5";
+        char passwd[] = "a";
+        struct berval passwdStruct = {strlen(passwd), passwd};
+        LDAPControl** sctrls = NULL;
+        LDAPControl** cctrls = NULL;
+        int msgid, rc;
+        rc = ldap_sasl_bind(ld, dn, mechanism, &passwdStruct, sctrls, cctrls, &msgid);
+        if (msgid == -1) {
+            return Status(ErrorCodes::UnknownError, mongoutils::str::stream() << "ERRORERROR: " << ldap_err2string(rc));
+        }
+        cout << "BBBBBBBBBBBBBBBB" << endl;
+        LDAPMessage *result;
+        struct timeval timeout;
+        timeout.tv_sec = 1;
+        rc = ldap_result( ld, msgid, LDAP_MSG_ALL, &timeout, &result );
+        cout <<"b.5b.5b.5b.5b.5b.5b.5b.5b.5b.5b.5b.5b.5b.5b.5" << endl;
+        if (rc == 0 || rc == 1) {
+            char *msg=NULL;
+            ldap_get_option( ld, LDAP_OPT_DIAGNOSTIC_MESSAGE, (void*)&msg);
+            cout << msg << endl;
+            return Status(ErrorCodes::UnknownError, "something bad happened");
+        }
+        cout << "CCCCCCCCCCCCC" << endl;
+        int err;
+        char* matched = NULL;
+        char* info = NULL;
+        char** refs = NULL;
+        LDAPControl** ctrls;
+        rc = ldap_parse_result( ld, result, &err, &matched, &info, &refs, &ctrls, 1 );
+        cout << "DDDDDDDDDDDDDD" << endl;
+        if ( rc != LDAP_SUCCESS ) {
+            return Status(ErrorCodes::UnknownError, mongoutils::str::stream() << "ERRORERROR: " << ldap_err2string(rc));
+        } else {
+            cout << "GREAT SUCCESS!" << endl;
+        }
+        return Status::OK();*/
+        /*GsaslSession session;
 
         int saslLogLevel = getSaslClientLogLevel(saslParameters);
 
@@ -218,7 +346,7 @@ namespace {
 
         if (!isServerDone)
             return Status(ErrorCodes::ProtocolError, "Client finished before server.");
-        return Status::OK();
+        return Status::OK();*/
     }
 
     MONGO_INITIALIZER(SaslClientAuthenticateFunction)(InitializerContext* context) {
