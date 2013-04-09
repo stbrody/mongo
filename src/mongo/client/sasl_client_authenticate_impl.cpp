@@ -204,23 +204,46 @@ namespace {
                                       const BSONObj& saslParameters,
                                       void* sessionHook) {
         lutilSASLdefaults defaults;
-        char mechanism[] = "DIGEST-MD5";
-        char* realm = NULL;
-        char authcid[] = "a";
-        char authzid[] = "a";
-        char passwd[] = "a";
-        defaults.mech = mechanism;
-        defaults.realm = realm;
-        defaults.authcid = authcid;
-        defaults.authzid = authzid;
-        defaults.passwd = passwd;
+        string mechanismString;
+        string authcidString;
+        string authzidString;
+        string passwordString;
+        bsonExtractStringFieldWithDefault(saslParameters,
+                                          "mechanism",
+                                          "DIGEST-MD5",
+                                          &mechanismString);
+        bsonExtractStringFieldWithDefault(saslParameters,
+                                          "authcid",
+                                          "a",
+                                          &authcidString);
+        bsonExtractStringFieldWithDefault(saslParameters,
+                                          "authzid",
+                                          "a",
+                                          &authzidString);
+        bsonExtractStringFieldWithDefault(saslParameters,
+                                          "password",
+                                          "a",
+                                          &passwordString);
+        scoped_ptr<char> mechanism(new char[mechanismString.length() + 1]);
+        strcpy(mechanism.get(), mechanismString.c_str());
+        scoped_ptr<char> authcid(new char[authcidString.length() + 1]);
+        strcpy(authcid.get(), authcidString.c_str());
+        scoped_ptr<char> authzid(new char[authzidString.length() + 1]);
+        strcpy(authzid.get(), authzidString.c_str());
+        scoped_ptr<char> password(new char[passwordString.length() + 1]);
+        strcpy(password.get(), passwordString.c_str());
+        defaults.mech = mechanism.get();
+        defaults.authcid = authcid.get();
+        defaults.authzid = authzid.get();
+        defaults.passwd = password.get();
+        defaults.realm = NULL;
         defaults.resps = NULL;
         defaults.nresps = 0;
 
-        int rc = ldap_sasl_interactive_bind_s( ld, NULL, mechanism, NULL,
+        int rc = ldap_sasl_interactive_bind_s( ld, NULL, mechanism.get(), NULL,
                                                NULL, 0, ldap_sasl_interact_func, (void*) &defaults );
         if (rc != LDAP_SUCCESS) {
-            cout << "UHOH!!!!" << endl;
+            cout << "Interactive bind failed!" << endl;
             char *msg=NULL;
             ldap_get_option( ld, LDAP_OPT_DIAGNOSTIC_MESSAGE, (void*)&msg);
             if (msg)
@@ -229,124 +252,6 @@ namespace {
                           rc << ", message: " << ldap_err2string(rc));
         }
         return Status::OK();
-
-        /*
-        cout << "AAAAAAAAAAAAA" << endl;
-        const char* dn = NULL; // Docs say this should always be NULL for sasl
-        //const char* mechanism = LDAP_SASL_SIMPLE;
-        const char* mechanism = "DIGEST-MD5";
-        char passwd[] = "a";
-        struct berval passwdStruct = {strlen(passwd), passwd};
-        LDAPControl** sctrls = NULL;
-        LDAPControl** cctrls = NULL;
-        int msgid, rc;
-        rc = ldap_sasl_bind(ld, dn, mechanism, &passwdStruct, sctrls, cctrls, &msgid);
-        if (msgid == -1) {
-            return Status(ErrorCodes::UnknownError, mongoutils::str::stream() << "ERRORERROR: " << ldap_err2string(rc));
-        }
-        cout << "BBBBBBBBBBBBBBBB" << endl;
-        LDAPMessage *result;
-        struct timeval timeout;
-        timeout.tv_sec = 1;
-        rc = ldap_result( ld, msgid, LDAP_MSG_ALL, &timeout, &result );
-        cout <<"b.5b.5b.5b.5b.5b.5b.5b.5b.5b.5b.5b.5b.5b.5b.5" << endl;
-        if (rc == 0 || rc == 1) {
-            char *msg=NULL;
-            ldap_get_option( ld, LDAP_OPT_DIAGNOSTIC_MESSAGE, (void*)&msg);
-            cout << msg << endl;
-            return Status(ErrorCodes::UnknownError, "something bad happened");
-        }
-        cout << "CCCCCCCCCCCCC" << endl;
-        int err;
-        char* matched = NULL;
-        char* info = NULL;
-        char** refs = NULL;
-        LDAPControl** ctrls;
-        rc = ldap_parse_result( ld, result, &err, &matched, &info, &refs, &ctrls, 1 );
-        cout << "DDDDDDDDDDDDDD" << endl;
-        if ( rc != LDAP_SUCCESS ) {
-            return Status(ErrorCodes::UnknownError, mongoutils::str::stream() << "ERRORERROR: " << ldap_err2string(rc));
-        } else {
-            cout << "GREAT SUCCESS!" << endl;
-        }
-        return Status::OK();*/
-        /*GsaslSession session;
-
-        int saslLogLevel = getSaslClientLogLevel(saslParameters);
-
-        Status status = configureSession(_gsaslLibraryContext,
-                                         client,
-                                         saslParameters,
-                                         sessionHook,
-                                         &session);
-        if (!status.isOK())
-            return status;
-
-        std::string targetDatabase;
-        status = bsonExtractStringFieldWithDefault(saslParameters,
-                                                   saslCommandPrincipalSourceFieldName,
-                                                   saslDefaultDBName,
-                                                   &targetDatabase);
-        if (!status.isOK())
-            return status;
-
-        BSONObj saslFirstCommandPrefix = BSON(
-                saslStartCommandName << 1 <<
-                saslCommandMechanismFieldName << session.getMechanism());
-
-        BSONObj saslFollowupCommandPrefix = BSON(saslContinueCommandName << 1);
-        BSONObj saslCommandPrefix = saslFirstCommandPrefix;
-        BSONObj inputObj = BSON(saslCommandPayloadFieldName << "");
-        bool isServerDone = false;
-        while (!session.isDone()) {
-            std::string payload;
-            BSONType type;
-
-            status = saslExtractPayload(inputObj, &payload, &type);
-            if (!status.isOK())
-                return status;
-
-            LOG(saslLogLevel) << "sasl client input: " << base64::encode(payload) << endl;
-
-            std::string responsePayload;
-            status = session.step(payload, &responsePayload);
-            if (!status.isOK())
-                return status;
-
-            LOG(saslLogLevel) << "sasl client output: " << base64::encode(responsePayload) << endl;
-
-            BSONObjBuilder commandBuilder;
-            commandBuilder.appendElements(saslCommandPrefix);
-            commandBuilder.appendBinData(saslCommandPayloadFieldName,
-                                         int(responsePayload.size()),
-                                         BinDataGeneral,
-                                         responsePayload.c_str());
-            BSONElement conversationId = inputObj[saslCommandConversationIdFieldName];
-            if (!conversationId.eoo())
-                commandBuilder.append(conversationId);
-
-            // Server versions 2.3.2 and earlier may return "ok: 1" with a non-zero "code" field,
-            // indicating a failure.  Subsequent versions should return "ok: 0" on failure with a
-            // non-zero "code" field to indicate specific failure.  In all versions, ok: 1, code: >0
-            // and ok: 0, code optional, indicate failure.
-            bool ok = client->runCommand(targetDatabase, commandBuilder.obj(), inputObj);
-            ErrorCodes::Error code = ErrorCodes::fromInt(
-                    inputObj[saslCommandCodeFieldName].numberInt());
-
-            if (!ok || code != ErrorCodes::OK) {
-                if (code == ErrorCodes::OK)
-                    code = ErrorCodes::UnknownError;
-
-                return Status(code, inputObj[saslCommandErrmsgFieldName].str());
-            }
-
-            isServerDone = inputObj[saslCommandDoneFieldName].trueValue();
-            saslCommandPrefix = saslFollowupCommandPrefix;
-        }
-
-        if (!isServerDone)
-            return Status(ErrorCodes::ProtocolError, "Client finished before server.");
-        return Status::OK();*/
     }
 
     MONGO_INITIALIZER(SaslClientAuthenticateFunction)(InitializerContext* context) {
