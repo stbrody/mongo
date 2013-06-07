@@ -102,8 +102,8 @@ namespace mongo {
                                              int wtimeout=0);
         virtual BSONObj getLastErrorDetailed(bool fsync=false, bool j=false, int w=0, int wtimeout=0);
         virtual BSONObj getLastErrorDetailed(const std::string& db,
-                                             const WriteConcern& writeConcern);
-        virtual BSONObj getLastErrorDetailed(const WriteConcern& writeConcern);
+                                             const BSONObj& writeConcern);
+        virtual BSONObj getLastErrorDetailed(const BSONObj& writeConcern);
 
         virtual bool callRead( Message& toSend , Message& response );
 

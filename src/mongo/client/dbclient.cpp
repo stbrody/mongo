@@ -465,60 +465,40 @@ namespace mongo {
                                                        bool j,
                                                        int w,
                                                        int wtimeout) {
-        WriteConcern writeConcern;
+        BSONObjBuilder writeConcern;
 
         if ( fsync )
-            writeConcern.fsync = true;
+            writeConcern.append("fsync", true);
         if ( j )
-            writeConcern.j = true;
+            writeConcern.append("j", true);
 
         // only affects request when greater than one node
         if ( w >= 1 ) {
-            writeConcern.wIsNumber = true;
-            writeConcern.wNumber = w;
+            writeConcern.append("w", w);
         }
         else if ( w == -1 ) {
-            writeConcern.wIsNumber = false;
-            writeConcern.wString = "majority";
+            writeConcern.append("w", "majority");
         }
 
         if ( wtimeout > 0 )
-            writeConcern.wTimeout = wtimeout;
+            writeConcern.append("wtimeout", wtimeout);
 
-        return getLastErrorDetailed(db, writeConcern);
+        return getLastErrorDetailed(db, writeConcern.done());
     }
 
     BSONObj DBClientWithCommands::getLastErrorDetailed(const std::string& db,
-                                                       const WriteConcern& writeConcern) {
+                                                       const BSONObj& writeConcern) {
         BSONObj info;
         BSONObjBuilder b;
         b.append("getlasterror", 1);
 
-        if (writeConcern.fsync) {
-            b.append("fsync", 1);
-        }
-
-        if (writeConcern.j) {
-            b.append("j", 1);
-        }
-
-        // only affects request when greater than one node
-        if (writeConcern.wIsNumber && writeConcern.wNumber > 0) {
-            b.append("w", writeConcern.wNumber);
-        } else if (!writeConcern.wIsNumber) {
-            b.append("w", writeConcern.wString);
-        }
-
-        if (writeConcern.wTimeout > 0) {
-            b.append("wtimeout", writeConcern.wTimeout);
-        }
-
+        b.appendElements(writeConcern);
         runCommand(db, b.obj(), info);
 
         return info;
     }
 
-    BSONObj DBClientWithCommands::getLastErrorDetailed(const WriteConcern& writeConcern) {
+    BSONObj DBClientWithCommands::getLastErrorDetailed(const BSONObj& writeConcern) {
         return getLastErrorDetailed("admin", writeConcern);
     }
 
@@ -535,7 +515,7 @@ namespace mongo {
         return getLastErrorString( info );
     }
 
-    string DBClientWithCommands::getLastError(const WriteConcern& writeConcern) {
+    string DBClientWithCommands::getLastError(const BSONObj& writeConcern) {
         BSONObj info = getLastErrorDetailed("admin", writeConcern);
         return getLastErrorString( info );
     }
