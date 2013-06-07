@@ -304,16 +304,6 @@ namespace mongo {
         static ConnectionHook* _connectHook;
     };
 
-    /**
-     * controls how much a clients cares about writes
-     * default is NORMAL
-     */
-    enum WriteConcern {
-        W_NONE = 0 , // TODO: not every connection type fully supports this
-        W_NORMAL = 1
-        // TODO SAFE = 2
-    };
-
     class BSONObj;
     class ScopedDbConnection;
     class DBClientCursor;
@@ -992,19 +982,14 @@ namespace mongo {
     protected:
         static AtomicInt64 ConnectionIdSequence;
         long long _connectionId; // unique connection id for this connection
-        WriteConcern _writeConcern;
     public:
         static const uint64_t INVALID_SOCK_CREATION_TIME;
 
         DBClientBase() {
-            _writeConcern = W_NORMAL;
             _connectionId = ConnectionIdSequence.fetchAndAdd(1);
         }
 
         long long getConnectionId() const { return _connectionId; }
-
-        WriteConcern getWriteConcern() const { return _writeConcern; }
-        void setWriteConcern( WriteConcern w ) { _writeConcern = w; }
 
         /** send a query to the database.
          @param ns namespace to query, format is <dbname>.<collectname>[.<collectname>]*

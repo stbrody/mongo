@@ -111,9 +111,6 @@ namespace mongo {
     }
 
     void Balancer::_ping( DBClientBase& conn, bool waiting ) {
-        WriteConcern w = conn.getWriteConcern();
-        conn.setWriteConcern( W_NONE );
-
         conn.update( MongosType::ConfigNS ,
                      BSON( MongosType::name(_myid) ) ,
                      BSON( "$set" << BSON( MongosType::ping(jsTime()) <<
@@ -121,8 +118,6 @@ namespace mongo {
                                            MongosType::waiting(waiting) <<
                                            MongosType::mongoVersion(versionString) ) ) ,
                      true );
-
-        conn.setWriteConcern( w);
     }
 
     bool Balancer::_checkOIDs() {
