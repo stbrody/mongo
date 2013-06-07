@@ -155,6 +155,17 @@ namespace mongo {
         return DBClientBase::getLastErrorDetailed(db,fsync,j,w,wtimeout);
     }
 
+    BSONObj SyncClusterConnection::getLastErrorDetailed(const WriteConcern& writeConcern) {
+        return getLastErrorDetailed("admin", writeConcern);
+    }
+
+    BSONObj SyncClusterConnection::getLastErrorDetailed(const std::string& db,
+                                                        const WriteConcern& writeConcern) {
+        if ( _lastErrors.size() )
+            return _lastErrors[0];
+        return DBClientBase::getLastErrorDetailed(db, writeConcern);
+    }
+
     void SyncClusterConnection::_connect( const std::string& host ) {
         log() << "SyncClusterConnection connecting to [" << host << "]" << endl;
         DBClientConnection * c = new DBClientConnection( true );

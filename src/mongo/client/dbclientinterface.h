@@ -499,6 +499,15 @@ namespace mongo {
     /** @return the collection name portion of an ns string */
     string nsGetCollection( const string &ns );
 
+    struct WriteConcern {
+        bool wIsNumber; // If true, wNumber is set.  If false, wString is set.
+        int wNumber; // Only one of wNumber and wString will be set at a time.
+        string wString; // Only one of wNumber and wString will be set at a time.
+        bool fsync;
+        bool j;
+        int wTimeout;
+    };
+
     /**
        interface that handles communication with the db
      */
@@ -690,6 +699,9 @@ namespace mongo {
         // Same as above but defaults to using admin DB
         string getLastError(bool fsync = false, bool j = false, int w = 0, int wtimeout = 0);
 
+        string getLastError(const std::string& db, const WriteConcern& writeConcern);
+        string getLastError(const WriteConcern& writeConcern);
+
         /** Get error result from the last write operation (insert/update/delete) on this connection.
             db doesn't change the command's behavior - it is just for auth checks.
             @return full error object.
@@ -704,6 +716,11 @@ namespace mongo {
                                              int wtimeout = 0);
         // Same as above but defaults to using admin DB
         virtual BSONObj getLastErrorDetailed(bool fsync = false, bool j = false, int w = 0, int wtimeout = 0);
+
+        // Same as above but takes arguments in a WriteConcern object.
+        virtual BSONObj getLastErrorDetailed(const std::string& db,
+                                             const WriteConcern& writeConcern);
+        virtual BSONObj getLastErrorDetailed(const WriteConcern& writeConcern);
 
         /** Can be called with the returned value from getLastErrorDetailed to extract an error string. 
             If all you need is the string, just call getLastError() instead.
