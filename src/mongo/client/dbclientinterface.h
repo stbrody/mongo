@@ -499,15 +499,6 @@ namespace mongo {
     /** @return the collection name portion of an ns string */
     string nsGetCollection( const string &ns );
 
-    struct WriteConcern {
-        bool wIsNumber; // If true, wNumber is set.  If false, wString is set.
-        int wNumber; // Only one of wNumber and wString will be set at a time.
-        string wString; // Only one of wNumber and wString will be set at a time.
-        bool fsync;
-        bool j;
-        int wTimeout;
-    };
-
     /**
        interface that handles communication with the db
      */
