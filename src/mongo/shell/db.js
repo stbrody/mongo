@@ -64,68 +64,30 @@ DB.prototype.adminCommand = function( obj ){
 DB.prototype._adminCommand = DB.prototype.adminCommand; // alias old name
 
 DB.prototype._createUser = function(userObj, replicatedTo, timeout) {
-    var c = this.getCollection( "system.users" );
-    try {
-        c.save(userObj);
-    } catch (e) {
-        // SyncClusterConnections call GLE automatically after every write and will throw an
-        // exception if the insert failed.
-        if ( tojson(e).indexOf( "login" ) >= 0 ){
-            // TODO: this check is a hack
-            print( "Creating user seems to have succeeded but threw an exception because we no " +
-                   "longer have auth." );
-        } else {
-            throw "Could not insert into system.users: " + tojson(e);
-        }
-    }
+    var cmdObj = {createUser:1};
+    cmdObj = Object.extend(cmdObj, userObj);
+
+    var res = this.runCommand(cmdObj);
     print(tojson(userObj));
 
-    //
-    // When saving users to replica sets, the shell user will want to know if the user hasn't
-    // been fully replicated everywhere, since this will impact security.  By default, replicate to
-    // majority of nodes with wtimeout 15 secs, though user can override
-    //
-    
-    replicatedTo = replicatedTo != undefined && replicatedTo != null ? replicatedTo : "majority"
-    
-    // in mongod version 2.1.0-, this worked
-    var le = {};
-    try {        
-        le = this.getLastErrorObj( replicatedTo, timeout || 30 * 1000 );
-        // printjson( le )
-    }
-    catch (e) {
-        errjson = tojson(e);
-        if ( errjson.indexOf( "login" ) >= 0 || errjson.indexOf( "unauthorized" ) >= 0 ) {
-            // TODO: this check is a hack
-            print( "addUser succeeded, but cannot wait for replication since we no longer have auth" );
-            return "";
-        }
-        print( "could not find getLastError object : " + tojson( e ) )
-    }
-
-    if (!le.err) {
+    if (res.ok) {
         return;
     }
 
     // We can't detect replica set shards via mongos, so we'll sometimes get this error
     // In this case though, we've already checked the local error before returning norepl, so
     // the user has been written and we're happy
-    if (le.err == "norepl" || le.err == "noreplset") {
+    if (res.errmsg == "norepl" || res.errmsg == "noreplset") {
         // nothing we can do
         return;
     }
 
-    if (le.err == "timeout") {
+    if (res.errmsg == "timeout") {
         throw "timed out while waiting for user authentication to replicate - " +
               "database will not be fully secured until replication finishes"
     }
 
-    if (le.err.startsWith("E11000 duplicate key error")) {
-        throw "User already exists with that username/userSource combination";
-    }
-
-    throw "couldn't add user: " + le.err;
+    throw "couldn't add user: " + res.errmsg;
 }
 
 function _hashPassword(username, password) {
