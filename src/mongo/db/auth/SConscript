@@ -49,6 +49,6 @@ env.CppUnitTest('principal_set_test', 'principal_set_test.cpp', LIBDEPS=['authco
 env.CppUnitTest('privilege_set_test', 'privilege_set_test.cpp', LIBDEPS=['authcore'])
 env.CppUnitTest('role_graph_test', 'role_graph_test.cpp', LIBDEPS=['authcore'])
 env.CppUnitTest('authorization_manager_test', 'authorization_manager_test.cpp',
-                LIBDEPS=['authcore'])
+                LIBDEPS=['authcore', '$BUILD_DIR/mongo/expressions'])
 env.CppUnitTest('authorization_session_test', 'authorization_session_test.cpp',
-                LIBDEPS=['authcore'])
+                LIBDEPS=['authcore', '$BUILD_DIR/mongo/expressions'])

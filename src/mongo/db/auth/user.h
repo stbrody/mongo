@@ -46,6 +46,7 @@ namespace mongo {
     public:
         struct CredentialData {
             std::string password;
+            bool isExternal;
         };
 
         explicit User(const UserName& name);

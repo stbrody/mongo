@@ -17,11 +17,14 @@
 #pragma once
 
 #include <string>
+#include <map>
 
 #include "mongo/base/disallow_copying.h"
 #include "mongo/base/status.h"
 #include "mongo/db/auth/authz_manager_external_state.h"
 #include "mongo/db/jsobj.h"
+#include "mongo/db/matcher/expression_parser.h"
+#include "mongo/db/namespacestring.h"
 
 namespace mongo {
 
@@ -40,6 +43,16 @@ namespace mongo {
             return Status::OK();
         }
 
+        // Non-const version that puts document into a vector that can be accessed later
+        Status insertPrivilegeDocument(const std::string& dbname, const BSONObj& userObj) {
+            _userDocuments.insert(make_pair(dbname, userObj));
+            return Status::OK();
+        }
+
+        void clearPrivilegeDocuments() {
+            _userDocuments.clear();
+        }
+
         virtual Status updatePrivilegeDocument(const UserName& user,
                                                const BSONObj& updateObj) const {
             return Status::OK();
@@ -48,8 +61,24 @@ namespace mongo {
         virtual bool _findUser(const std::string& usersNamespace,
                                const BSONObj& query,
                                BSONObj* result) const {
+            StatusWithMatchExpression parseResult = MatchExpressionParser::parse(query);
+            if (!parseResult.isOK()) {
+                return false;
+            }
+            MatchExpression* matcher = parseResult.getValue();
+
+            for (map<std::string, BSONObj>::const_iterator it = _userDocuments.begin();
+                    it != _userDocuments.end(); ++it) {
+                if (nsToDatabase(usersNamespace) == it->first && matcher->matchesBSON(it->second)) {
+                    *result = it->second;
+                    return true;
+                }
+            }
             return false;
         }
+
+    private:
+        map<std::string, BSONObj> _userDocuments; // dbname to user document
     };
 
 } // namespace mongo
