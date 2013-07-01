@@ -138,7 +138,7 @@ namespace mongo {
 
         /**
          * Decrements the refcount of the given User object.  If the refcount has gone to zero,
-         * deletes the User.
+         * deletes the User.  Caller must stop using its pointer to "user" after calling this.
          */
         void releaseUser(User* user);
 

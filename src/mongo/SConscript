@@ -614,7 +614,8 @@ env.CppUnitTest("shard_conn_test", [ "s/shard_conn_test.cpp" ],
                     "coredb",
                     "dbcmdline",
                     "mongodandmongos",
-                    "mocklib"],
+                    "mocklib",
+                    "$BUILD_DIR/mongo/db/auth/authManagerMock"],
                  NO_CRUTCH=True)
 
 env.CppUnitTest("shard_test", [ "s/shard_test.cpp" ],
@@ -725,7 +726,10 @@ Default( mongod )
 
 # tools
 allToolFiles = [ "tools/tool.cpp", "tools/stat_util.cpp" ]
-env.StaticLibrary("alltools", allToolFiles, LIBDEPS=["serveronly", "coreserver", "coredb"])
+env.StaticLibrary("alltools", allToolFiles, LIBDEPS=["serveronly",
+                                                     "coreserver",
+                                                     "coredb",
+                                                     "$BUILD_DIR/mongo/db/auth/authManagerMock"])
 
 normalTools = [ "dump", "restore", "export", "import", "stat", "top", "oplog" ]
 env.Alias( "tools", [ "#/${PROGPREFIX}mongo" + x + "${PROGSUFFIX}" for x in normalTools ] )
@@ -782,7 +786,8 @@ test = testEnv.Install(
                        "testframework",
                        "gridfs",
                        "s/upgrade",
-                       "mocklib"]))
+                       "mocklib",
+                       "$BUILD_DIR/mongo/db/auth/authManagerMock"]))
 
 if len(testEnv.subst('$PROGSUFFIX')):
     testEnv.Alias( "test", "#/${PROGPREFIX}test${PROGSUFFIX}" )

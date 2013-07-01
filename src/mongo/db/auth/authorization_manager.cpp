@@ -14,6 +14,8 @@
 *    along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
 
+#include "mongo/platform/basic.h"
+
 #include "mongo/db/auth/authorization_manager.h"
 
 #include <boost/thread/mutex.hpp>
@@ -647,15 +649,16 @@ namespace {
     }
 
     Status AuthorizationManager::acquireUser(const UserName& userName, User** acquiredUser) {
-        boost::lock_guard<boost::mutex> lk(_lock);
+        boost::unique_lock<boost::mutex> lk(_lock);
         unordered_map<UserName, User*>::iterator it = _userCache.find(userName);
         if (it != _userCache.end()) {
+            fassert(16890, it->second);
             it->second->incrementRefCount();
             *acquiredUser = it->second;
             return Status::OK();
         }
 
-        // Put the new user into an auto_ptr temporarily in case there's an exception while
+        // Put the new user into an auto_ptr temporarily in case there's an error while
         // initializing the user.
         auto_ptr<User> userHolder(new User(userName));
         User* user = userHolder.get();
@@ -693,20 +696,6 @@ namespace {
             _userCache.erase(user->getName());
             delete user;
         }
-    }
-
-    Status AuthorizationManager::_initializeUserFromPrivilegeDocument(
-            User* user, const BSONObj& privDoc) const {
-        Status status = _initializeUserCredentialsFromPrivilegeDocument(user, privDoc);
-        if (!status.isOK()) {
-            return status;
-        }
-        status = _initializeUserRolesFromPrivilegeDocument(user, privDoc, user->getName().getDB());
-        if (!status.isOK()) {
-            return status;
-        }
-        _initializeUserPrivilegesFromRoles(user);
-        return Status::OK();
     }
 
     /**
@@ -801,5 +790,19 @@ namespace {
                                         &privileges);
         }
         user->addPrivileges(privileges);
+    }
+
+    Status AuthorizationManager::_initializeUserFromPrivilegeDocument(
+            User* user, const BSONObj& privDoc) const {
+        Status status = _initializeUserCredentialsFromPrivilegeDocument(user, privDoc);
+        if (!status.isOK()) {
+            return status;
+        }
+        status = _initializeUserRolesFromPrivilegeDocument(user, privDoc, user->getName().getDB());
+        if (!status.isOK()) {
+            return status;
+        }
+        _initializeUserPrivilegesFromRoles(user);
+        return Status::OK();
     }
 } // namespace mongo
