@@ -174,12 +174,21 @@ namespace {
         return checkAuthForPrivilege(Privilege(resource, actions)).isOK();
     }
 
-    Status AuthorizationSession::checkAuthForQuery(const std::string& ns) {
+    Status AuthorizationSession::checkAuthForQuery(const std::string& ns, const BSONObj& query) {
         NamespaceString namespaceString(ns);
         verify(!namespaceString.isCommand());
         if (!checkAuthorization(ns, ActionType::find)) {
             return Status(ErrorCodes::Unauthorized,
                           mongoutils::str::stream() << "not authorized for query on " << ns,
+                          0);
+        }
+        return Status::OK();
+    }
+
+    Status AuthorizationSession::checkAuthForGetMore(const std::string& ns) {
+        if (!checkAuthorization(ns, ActionType::find)) {
+            return Status(ErrorCodes::Unauthorized,
+                          mongoutils::str::stream() << "not authorized for getmore on " << ns,
                           0);
         }
         return Status::OK();
@@ -225,10 +234,6 @@ namespace {
                           0);
         }
         return Status::OK();
-    }
-
-    Status AuthorizationSession::checkAuthForGetMore(const std::string& ns) {
-        return checkAuthForQuery(ns);
     }
 
     Privilege AuthorizationSession::_modifyPrivilegeForSpecialCases(const Privilege& privilege) {

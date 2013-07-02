@@ -97,9 +97,13 @@ namespace mongo {
                                                       const UserName& user,
                                                       const BSONObj& privilegeDocument);
 
-        // Checks if this connection has the privileges necessary to perform a query on the given
+        // Checks if this connection has the privileges necessary to perform the given query on the
+        // given namespace.
+        Status checkAuthForQuery(const std::string& ns, const BSONObj& query);
+
+        // Checks if this connection has the privileges necessary to perform a getMore on the given
         // namespace.
-        Status checkAuthForQuery(const std::string& ns);
+        Status checkAuthForGetMore(const std::string& ns);
 
         // Checks if this connection has the privileges necessary to perform an update on the given
         // namespace.
@@ -112,10 +116,6 @@ namespace mongo {
         // Checks if this connection has the privileges necessary to perform a delete on the given
         // namespace.
         Status checkAuthForDelete(const std::string& ns);
-
-        // Checks if this connection has the privileges necessary to perform a getMore on the given
-        // namespace.
-        Status checkAuthForGetMore(const std::string& ns);
 
         // Checks if this connection is authorized for the given Privilege.
         Status checkAuthForPrivilege(const Privilege& privilege);

@@ -244,7 +244,8 @@ namespace mongo {
         try {
             if (!NamespaceString(d.getns()).isCommand()) {
                 // Auth checking for Commands happens later.
-                Status status = cc().getAuthorizationSession()->checkAuthForQuery(d.getns());
+                Status status = cc().getAuthorizationSession()->checkAuthForQuery(d.getns(),
+                                                                                  q.query);
                 uassert(16550, status.reason(), status.isOK());
             }
             dbresponse.exhaustNS = runQuery(m, q, op, *resp);

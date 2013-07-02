@@ -55,7 +55,7 @@ namespace mongo {
 
             AuthorizationSession* authSession =
                     ClientBasic::getCurrent()->getAuthorizationSession();
-            Status status = authSession->checkAuthForQuery(q.ns);
+            Status status = authSession->checkAuthForQuery(q.ns, q.query);
             uassert(16549, status.reason(), status.isOK());
 
             LOG(3) << "shard query: " << q.ns << "  " << q.query << endl;
