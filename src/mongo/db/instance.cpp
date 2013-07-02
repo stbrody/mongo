@@ -549,7 +549,10 @@ namespace mongo {
         bool multi = flags & UpdateOption_Multi;
         bool broadcast = flags & UpdateOption_Broadcast;
 
-        Status status = cc().getAuthorizationSession()->checkAuthForUpdate(ns, upsert);
+        Status status = cc().getAuthorizationSession()->checkAuthForUpdate(ns,
+                                                                           query,
+                                                                           toupdate,
+                                                                           upsert);
         uassert(16538, status.reason(), status.isOK());
 
         op.debug().query = query;

@@ -1009,14 +1009,15 @@ namespace mongo {
             const BSONObj query = d.nextJsObj();
 
             bool upsert = flags & UpdateOption_Upsert;
-            AuthorizationSession* authSession =
-                    ClientBasic::getCurrent()->getAuthorizationSession();
-            Status status = authSession->checkAuthForUpdate(ns, upsert);
-            uassert(16537, status.reason(), status.isOK());
 
             uassert( 10201 ,  "invalid update" , d.moreJSObjs() );
 
             const BSONObj toUpdate = d.nextJsObj();
+
+            AuthorizationSession* authzSession =
+                    ClientBasic::getCurrent()->getAuthorizationSession();
+            Status status = authzSession->checkAuthForUpdate(ns, query, toUpdate, upsert);
+            uassert(16537, status.reason(), status.isOK());
 
             if( d.reservedField() & Reserved_FromWriteback ){
                 flags |= WriteOption_FromWriteback;

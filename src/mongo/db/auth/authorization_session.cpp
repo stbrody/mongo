@@ -216,7 +216,10 @@ namespace {
         return Status::OK();
     }
 
-    Status AuthorizationSession::checkAuthForUpdate(const std::string& ns, bool upsert) {
+    Status AuthorizationSession::checkAuthForUpdate(const std::string& ns,
+                                                    const BSONObj& query,
+                                                    const BSONObj& update,
+                                                    bool upsert) {
         NamespaceString namespaceString(ns);
         if (!upsert) {
             if (!checkAuthorization(ns, ActionType::update)) {
