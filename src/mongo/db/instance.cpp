@@ -584,9 +584,6 @@ namespace mongo {
         DbMessage d(m);
         const char *ns = d.getns();
 
-        Status status = cc().getAuthorizationSession()->checkAuthForDelete(ns);
-        uassert(16542, status.reason(), status.isOK());
-
         op.debug().ns = ns;
         int flags = d.pullInt();
         bool justOne = flags & RemoveOption_JustOne;
@@ -594,6 +591,9 @@ namespace mongo {
         verify( d.moreJSObjs() );
         BSONObj pattern = d.nextJsObj();
         
+        Status status = cc().getAuthorizationSession()->checkAuthForDelete(ns, pattern);
+        uassert(16542, status.reason(), status.isOK());
+
         op.debug().query = pattern;
         op.setQuery(pattern);
 

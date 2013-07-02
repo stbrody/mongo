@@ -1168,14 +1168,14 @@ namespace mongo {
             const string& ns = r.getns();
             int flags = d.pullInt();
 
-            AuthorizationSession* authSession =
-                    ClientBasic::getCurrent()->getAuthorizationSession();
-            Status status = authSession->checkAuthForDelete(ns);
-            uassert(16541, status.reason(), status.isOK());
-
             uassert( 10203 ,  "bad delete message" , d.moreJSObjs() );
 
             const BSONObj query = d.nextJsObj();
+
+            AuthorizationSession* authSession =
+                    ClientBasic::getCurrent()->getAuthorizationSession();
+            Status status = authSession->checkAuthForDelete(ns, query);
+            uassert(16541, status.reason(), status.isOK());
 
             if( d.reservedField() & Reserved_FromWriteback ){
                 flags |= WriteOption_FromWriteback;

@@ -226,7 +226,7 @@ namespace {
         return Status::OK();
     }
 
-    Status AuthorizationSession::checkAuthForDelete(const std::string& ns) {
+    Status AuthorizationSession::checkAuthForDelete(const std::string& ns, const BSONObj& query) {
         NamespaceString namespaceString(ns);
         if (!checkAuthorization(ns, ActionType::remove)) {
             return Status(ErrorCodes::Unauthorized,

@@ -115,7 +115,7 @@ namespace mongo {
 
         // Checks if this connection has the privileges necessary to perform a delete on the given
         // namespace.
-        Status checkAuthForDelete(const std::string& ns);
+        Status checkAuthForDelete(const std::string& ns, const BSONObj& query);
 
         // Checks if this connection is authorized for the given Privilege.
         Status checkAuthForPrivilege(const Privilege& privilege);
