@@ -809,14 +809,6 @@ namespace mongo {
         const char *ns = d.getns();
         op.debug().ns = ns;
 
-        bool isIndexWrite = nsToCollectionSubstring(ns) == "system.indexes";
-
-        // Auth checking for index writes happens further down in this function.
-        if (!isIndexWrite) {
-            Status status = cc().getAuthorizationSession()->checkAuthForInsert(ns);
-            uassert(16544, status.reason(), status.isOK());
-        }
-
         if( !d.moreJSObjs() ) {
             // strange.  should we complain?
             return;
@@ -826,14 +818,11 @@ namespace mongo {
         while (d.moreJSObjs()){
             BSONObj obj = d.nextJsObj();
             multi.push_back(obj);
-            if (isIndexWrite) {
-                string indexNS = obj.getStringField("ns");
-                uassert(16548,
-                        mongoutils::str::stream() << "not authorized to create index on "
-                                << indexNS,
-                        cc().getAuthorizationSession()->checkAuthorization(
-                                indexNS, ActionType::ensureIndex));
-            }
+
+            // Check auth for insert (also handles checking if this is an index build and checks
+            // for the proper privileges in that case).
+            Status status = cc().getAuthorizationSession()->checkAuthForInsert(ns, obj);
+            uassert(16544, status.reason(), status.isOK());
         }
 
         PageFaultRetryableSection s;

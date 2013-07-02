@@ -109,9 +109,10 @@ namespace mongo {
         // namespace.
         Status checkAuthForUpdate(const std::string& ns, bool upsert);
 
-        // Checks if this connection has the privileges necessary to perform an insert to the given
-        // namespace.
-        Status checkAuthForInsert(const std::string& ns);
+        // Checks if this connection has the privileges necessary to insert the given document
+        // to the given namespace.  Correctly interprets inserts to system.indexes and performs
+        // the proper auth checks for index building.
+        Status checkAuthForInsert(const std::string& ns, const BSONObj& document);
 
         // Checks if this connection has the privileges necessary to perform a delete on the given
         // namespace.

@@ -512,12 +512,6 @@ namespace mongo {
 
             const string& ns = r.getns();
 
-            AuthorizationSession* authSession =
-                    ClientBasic::getCurrent()->getAuthorizationSession();
-            Status status = authSession->checkAuthForInsert(ns);
-            uassert(16540, status.reason(), status.isOK());
-
-
             int flags = 0;
 
             if (d.reservedField() & Reserved_InsertOption_ContinueOnError) flags |=
@@ -564,6 +558,14 @@ namespace mongo {
 
                 // We should always have a shard if we have any inserts
                 verify(group.inserts.size() == 0 || group.shard.get());
+
+                for (vector<BSONObj>::iterator it = group.inserts.begin();
+                        it != group.inserts.end(); ++it) {
+                    AuthorizationSession* authSession =
+                            ClientBasic::getCurrent()->getAuthorizationSession();
+                    Status status = authSession->checkAuthForInsert(ns, *it);
+                    uassert(16540, status.reason(), status.isOK());
+                }
 
                 if (group.inserts.size() > 0 && group.hasException()) {
                     warning() << "problem preparing batch insert detected, first inserting "
@@ -1237,6 +1239,12 @@ namespace mongo {
                 if (op == dbInsert) {
                     // Insert is the only write op allowed on system.indexes, so it's the only one
                     // we check auth for.
+
+                    // TODO(spencer): this auth check shouldn't be necessary.  We could just call
+                    // checkAuthForInsert with the insert object and it would handle checking for
+                    // index builds, but because of the way this file is structured we don't know
+                    // what the insert object looks like until after we've already special cased
+                    // index building.
                     AuthorizationSession* authSession =
                             ClientBasic::getCurrent()->getAuthorizationSession();
                     uassert(16547,

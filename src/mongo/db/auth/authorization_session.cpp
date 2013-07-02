@@ -194,13 +194,25 @@ namespace {
         return Status::OK();
     }
 
-    Status AuthorizationSession::checkAuthForInsert(const std::string& ns) {
+    Status AuthorizationSession::checkAuthForInsert(const std::string& ns,
+                                                    const BSONObj& document) {
         NamespaceString namespaceString(ns);
-        if (!checkAuthorization(ns, ActionType::insert)) {
-            return Status(ErrorCodes::Unauthorized,
-                          mongoutils::str::stream() << "not authorized for insert on " << ns,
-                          0);
+        if (namespaceString.coll() == StringData("system.indexes", StringData::LiteralTag())) {
+            std::string indexNS = document["ns"].String();
+            if (!checkAuthorization(indexNS, ActionType::ensureIndex)) {
+                return Status(ErrorCodes::Unauthorized,
+                              mongoutils::str::stream() << "not authorized to create index on " <<
+                                      indexNS,
+                              0);
+            }
+        } else {
+            if (!checkAuthorization(ns, ActionType::insert)) {
+                return Status(ErrorCodes::Unauthorized,
+                              mongoutils::str::stream() << "not authorized for insert on " << ns,
+                              0);
+            }
         }
+
         return Status::OK();
     }
 
