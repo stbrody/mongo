@@ -655,6 +655,7 @@ namespace {
         unordered_map<UserName, User*>::iterator it = _userCache.find(userName);
         if (it != _userCache.end()) {
             fassert(16914, it->second);
+            fassert(16985, it->second->isValid());
             it->second->incrementRefCount();
             *acquiredUser = it->second;
             return Status::OK();

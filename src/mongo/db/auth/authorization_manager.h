@@ -131,7 +131,9 @@ namespace mongo {
          *  If the user cache already has a user object for this user, it increments the refcount
          *  on that object and gives out a pointer to it.  If no user object for this user name
          *  exists yet in the cache, reads the user's privilege document from disk, builds up
-         *  a User object, sets the refcount to 1, and gives that out.
+         *  a User object, sets the refcount to 1, and gives that out.  The returned user is
+         *  guaranteed to be valid at the moment it is returned, though that could change the moment
+         *  after.
          *  The AuthorizationManager retains ownership of the returned User object.
          *  On non-OK Status return values, acquiredUser will not be modified.
          */
