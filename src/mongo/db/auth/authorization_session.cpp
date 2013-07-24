@@ -42,13 +42,14 @@ namespace {
     const std::string ADMIN_DBNAME = "admin";
 }  // namespace
 
-    AuthorizationSession::AuthorizationSession(AuthzSessionExternalState* externalState) {
+    AuthorizationSession::AuthorizationSession(AuthzSessionExternalState* externalState) :
+            _authenticatedUsers(&externalState->getAuthorizationManager()) {
         _externalState.reset(externalState);
     }
 
     AuthorizationSession::~AuthorizationSession(){}
 
-    const AuthorizationManager& AuthorizationSession::getAuthorizationManager() const {
+    AuthorizationManager& AuthorizationSession::getAuthorizationManager() const {
         return _externalState->getAuthorizationManager();
     }
 
