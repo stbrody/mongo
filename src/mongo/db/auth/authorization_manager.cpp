@@ -38,10 +38,16 @@
 
 namespace mongo {
 
-    AuthInfo::AuthInfo() {
-        user = UserName("__system", "local");
-    }
+    AuthInfo::AuthInfo() : user(UserName("__system", "local")) {}
     AuthInfo internalSecurity;
+
+    MONGO_INITIALIZER(SetupInternalSecurityUser)(InitializerContext* context) {
+        internalSecurity.user.incrementRefCount(); // The ref count should never be decremented
+        ActionSet allActions;
+        allActions.addAllActions();
+        internalSecurity.user.addPrivilege(Privilege(PrivilegeSet::WILDCARD_RESOURCE, allActions));
+        return Status::OK();
+    }
 
     const std::string AuthorizationManager::SERVER_RESOURCE_NAME = "$SERVER";
     const std::string AuthorizationManager::CLUSTER_RESOURCE_NAME = "$CLUSTER";

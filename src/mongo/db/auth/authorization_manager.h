@@ -38,8 +38,7 @@ namespace mongo {
      */
     struct AuthInfo {
         AuthInfo();
-        UserName user;
-        std::string pwd;
+        User user;
         BSONObj authParams;
     };
     extern AuthInfo internalSecurity; // set at startup and not changed after initialization.
