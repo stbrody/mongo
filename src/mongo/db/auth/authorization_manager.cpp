@@ -731,6 +731,15 @@ namespace {
         }
     }
 
+    void AuthorizationManager::invalidateUser(User* user) {
+        boost::lock_guard<boost::mutex> lk(_lock);
+        unordered_map<UserName, User*>::iterator it = _userCache.find(user->getName());
+        if (it != _userCache.end() && it->second == user) {
+            _userCache.erase(it);
+        }
+        user->invalidate();
+    }
+
     void AuthorizationManager::addInternalUser(User* user) {
         boost::lock_guard<boost::mutex> lk(_lock);
         _userCache.insert(make_pair(user->getName(), user));
