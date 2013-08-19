@@ -501,6 +501,47 @@ namespace {
                      "credentials" << BSON("MONGODB-CR" << "a") <<
                      "roles" << emptyArray <<
                      "delegatableRoles" << emptyArray)));
+
+        // Role needs source
+        ASSERT_NOT_OK(v2parser.checkValidPrivilegeDocument("test",
+                BSON("user" << "spencer" <<
+                     "userSource" << "test" <<
+                     "credentials" << BSON("MONGODB-CR" << "a") <<
+                     "roles" << BSON_ARRAY(BSON("name" << "roleA")) <<
+                     "delegatableRoles" << emptyArray)));
+
+        // Role needs name
+        ASSERT_NOT_OK(v2parser.checkValidPrivilegeDocument("test",
+                BSON("user" << "spencer" <<
+                     "userSource" << "test" <<
+                     "credentials" << BSON("MONGODB-CR" << "a") <<
+                     "roles" << BSON_ARRAY(BSON("source" << "dbA")) <<
+                     "delegatableRoles" << emptyArray)));
+
+        // Roles must be objects
+        ASSERT_NOT_OK(v2parser.checkValidPrivilegeDocument("test",
+                BSON("user" << "spencer" <<
+                     "userSource" << "test" <<
+                     "credentials" << BSON("MONGODB-CR" << "a") <<
+                     "roles" << BSON_ARRAY("read") <<
+                     "delegatableRoles" << emptyArray)));
+
+        ASSERT_OK(v2parser.checkValidPrivilegeDocument("test",
+                BSON("user" << "spencer" <<
+                     "userSource" << "test" <<
+                     "credentials" << BSON("MONGODB-CR" << "a") <<
+                     "roles" << BSON_ARRAY(BSON("name" << "roleA" << "source" << "dbA")) <<
+                     "delegatableRoles" << BSON_ARRAY(BSON("name" << "roleA" <<
+                                                           "source" << "dbA")))));
+
+        // Multiple roles OK
+        ASSERT_OK(v2parser.checkValidPrivilegeDocument("test",
+                BSON("user" << "spencer" <<
+                     "userSource" << "test" <<
+                     "credentials" << BSON("MONGODB-CR" << "a") <<
+                     "roles" << BSON_ARRAY(BSON("name" << "roleA" << "source" << "dbA") <<
+                                           BSON("name" << "roleB" << "source" << "dbB")) <<
+                     "delegatableRoles" << emptyArray)));
     }
 
 }  // namespace
