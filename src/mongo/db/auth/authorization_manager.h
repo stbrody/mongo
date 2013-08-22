@@ -92,6 +92,12 @@ namespace mongo {
 
         AuthzManagerExternalState* getExternalState() const;
 
+        /**
+         * Sets the version number of the authorization system.  Should only be called once at
+         * startup then never again.
+         */
+        void setAuthorizationVersion(int version);
+
         // Gets the privilege information document for "userName".
         //
         // On success, returns Status::OK() and stores a shared-ownership copy of the document into

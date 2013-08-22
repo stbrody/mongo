@@ -272,6 +272,10 @@ namespace {
         return _externalState.get();
     }
 
+    void AuthorizationManager::setAuthorizationVersion(int version) {
+        _version = version;
+    }
+
     void AuthorizationManager::setSupportOldStylePrivilegeDocuments(bool enabled) {
         _doesSupportOldStylePrivileges = enabled;
     }
@@ -290,7 +294,7 @@ namespace {
 
     Status AuthorizationManager::getPrivilegeDocument(const UserName& userName,
                                                       BSONObj* result) const {
-        return _externalState->getPrivilegeDocument(userName, result);
+        return _externalState->getPrivilegeDocument(userName, _version, result);
     }
 
     bool AuthorizationManager::hasAnyPrivilegeDocuments() const {
@@ -417,12 +421,23 @@ namespace {
                           0);
         }
 
-        V1PrivilegeDocumentParser parser;
-        Status status = parser.initializeUserCredentialsFromPrivilegeDocument(user, privDoc);
+        scoped_ptr<PrivilegeDocumentParser> parser;
+        if (_version == 1) {
+            parser.reset(new V1PrivilegeDocumentParser());
+        } else if (_version == 2) {
+            parser.reset(new V2PrivilegeDocumentParser());
+        } else {
+            return Status(ErrorCodes::UnsupportedFormat,
+                          mongoutils::str::stream() <<
+                                  "Unrecognized authorization format version: " <<
+                                  _version);
+        }
+
+        Status status = parser->initializeUserCredentialsFromPrivilegeDocument(user, privDoc);
         if (!status.isOK()) {
             return status;
         }
-        status = parser.initializeUserRolesFromPrivilegeDocument(user,
+        status = parser->initializeUserRolesFromPrivilegeDocument(user,
                                                                  privDoc,
                                                                  user->getName().getDB());
         if (!status.isOK()) {
@@ -450,19 +465,12 @@ namespace {
         User* user = userHolder.get();
 
         BSONObj userObj;
-        if (_version == 1) {
-            Status status = _externalState->getPrivilegeDocument(userName,  &userObj);
-            if (!status.isOK()) {
-                return status;
-            }
-        } else {
-            return Status(ErrorCodes::UnsupportedFormat,
-                          mongoutils::str::stream() <<
-                                  "Unrecognized authorization format version: " << _version);
+        Status status = getPrivilegeDocument(userName,  &userObj);
+        if (!status.isOK()) {
+            return status;
         }
 
-
-        Status status = _initializeUserFromPrivilegeDocument(user, userObj);
+        status = _initializeUserFromPrivilegeDocument(user, userObj);
         if (!status.isOK()) {
             return status;
         }
