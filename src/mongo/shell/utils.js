@@ -396,6 +396,12 @@ jsTest.path = jsTestPath
 jsTest.options = jsTestOptions
 jsTest.setOption = setJsTestOption
 jsTest.log = jsTestLog
+jsTest.readOnlyUserRoles = ["read"]
+jsTest.basicUserRoles = ["readWrite", "dbAdmin", "userAdmin"]
+jsTest.adminUserRoles = ["clusterAdmin",
+                         "userAdminAnyDatabase",
+                         "dbAdminAnyDatabase",
+                         "readWriteAnyDatabase"]
 
 jsTest.dir = function(){
     return jsTest.path().replace( /\/[^\/]+$/, "/" )
@@ -424,7 +430,7 @@ jsTest.addAuth = function(conn) {
     }
     print ("Adding admin user on connection: " + localconn);
     return localconn.getDB('admin').addUser(jsTestOptions().adminUser, jsTestOptions().adminPassword,
-                                            false, 'majority', 60000);
+                                            jsTest.adminUserRoles, 'majority', 60000);
 }
 
 jsTest.authenticate = function(conn) {
