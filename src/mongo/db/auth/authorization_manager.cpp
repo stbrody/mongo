@@ -75,6 +75,7 @@ namespace mongo {
     const std::string AuthorizationManager::V1_USER_NAME_FIELD_NAME = "user";
     const std::string AuthorizationManager::V1_USER_SOURCE_FIELD_NAME = "userSource";
 
+    // TODO: move these into RoleGraph
     const std::string AuthorizationManager::SYSTEM_ROLE_V0_READ = "oldRead";
     const std::string AuthorizationManager::SYSTEM_ROLE_V0_READ_WRITE= "oldReadWrite";
     const std::string AuthorizationManager::SYSTEM_ROLE_V0_ADMIN_READ = "oldAdminRead";
@@ -117,7 +118,7 @@ namespace {
 
     // This sets up the system role ActionSets.  This is what determines what actions each role
     // is authorized to perform
-    MONGO_INITIALIZER(AuthorizationSystemRoles)(InitializerContext* context) {
+    MONGO_INITIALIZER(AuthorizationSystemRolesInAM)(InitializerContext* context) { // TODO: remove
         // Read role
         readRoleActions.addAction(ActionType::cloneCollectionLocalSource);
         readRoleActions.addAction(ActionType::collStats);
