@@ -262,6 +262,16 @@ namespace {
 
 }  // namespace
 
+    ActionSet RoleGraph::getAllUserActions() const {
+        ActionSet allActions;
+        allActions.addAllActionsFromSet(readRoleActions);
+        allActions.addAllActionsFromSet(readWriteRoleActions);
+        allActions.addAllActionsFromSet(userAdminRoleActions);
+        allActions.addAllActionsFromSet(dbAdminRoleActions);
+        allActions.addAllActionsFromSet(clusterAdminRoleActions);
+        return allActions;
+    }
+
     bool RoleGraph::_isBuiltinRole(const RoleName& role) {
         bool isAdminDB = role.getDB() == "admin";
 
@@ -316,6 +326,7 @@ namespace {
 
         _createRoleDontCheckIfRoleExists(role);
         _addPrivilegeToRoleNoChecks(role, getPrivilegeForBuiltinRole(role));
+        recomputePrivilegeData();
     }
 
 } // namespace mongo

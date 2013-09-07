@@ -60,6 +60,12 @@ namespace mongo {
         void swap(RoleGraph& other);
 
         /**
+         * Returns an ActionSet of all actions that can be be granted to users.  This does not
+         * include internal-only actions.
+         */
+        ActionSet getAllUserActions() const;
+
+        /**
          * Returns an iterator that can be used to get a list of the members of the given role.
          * Members of a role are roles that have been granted this role directly (roles that are
          * members transitively through another role are not included).  These are the "parents" of
