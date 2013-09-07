@@ -115,6 +115,7 @@ namespace mongo {
          * Deletes the given role by first removing it from the members/subordinates arrays for
          * all other roles, and then by removing its own entries in the 4 member maps.
          * Returns RoleNotFound if the role doesn't exist.
+         * Returns InvalidRoleModification if "role" is a built-in role.
          */
         Status deleteRole(const RoleName& role);
 
@@ -123,6 +124,7 @@ namespace mongo {
          * as a subordinate of "recipient".
          * Returns RoleNotFound if either of "role" or "recipient" doesn't exist in
          * the RoleGraph.
+         * Returns InvalidRoleModification if "recipient" is a built-in role.
          */
         Status addRoleToRole(const RoleName& recipient, const RoleName& role);
 
@@ -131,19 +133,21 @@ namespace mongo {
          * Returns RoleNotFound if either of "role" or "recipient" doesn't exist in
          * the RoleGraph.  Returns RolesNotRelated if "recipient" is not currently a
          * member of "role".
+         * Returns InvalidRoleModification if "role" is a built-in role.
          */
         Status removeRoleFromRole(const RoleName& recipient, const RoleName& role);
 
         /**
          * Grants "privilegeToAdd" to "role".
          * Returns RoleNotFound if "role" doesn't exist in the role graph.
-         * Returns RoleModificationFailed if "role" is a built-in role.
+         * Returns InvalidRoleModification if "role" is a built-in role.
          */
         Status addPrivilegeToRole(const RoleName& role, const Privilege& privilegeToAdd);
 
         /**
          * Grants Privileges from "privilegesToAdd" to "role".
          * Returns RoleNotFound if "role" doesn't exist in the role graph.
+         * Returns InvalidRoleModification if "role" is a built-in role.
          */
         Status addPrivilegesToRole(const RoleName& role, const PrivilegeVector& privilegesToAdd);
 
@@ -151,6 +155,7 @@ namespace mongo {
          * Removes "privilegeToRemove" from "role".
          * Returns RoleNotFound if "role" doesn't exist in the role graph.
          * Returns PrivilegeNotFound if "role" doesn't contain the full privilege being removed.
+         * Returns InvalidRoleModification if "role" is a built-in role.
          */
         Status removePrivilegeFromRole(const RoleName& role,
                                        const Privilege& privilegeToRemove);
@@ -158,6 +163,7 @@ namespace mongo {
         /**
          * Removes all privileges in the "privilegesToRemove" vector from "role".
          * Returns RoleNotFound if "role" doesn't exist in the role graph.
+         * Returns InvalidRoleModification if "role" is a built-in role.
          * Returns PrivilegeNotFound if "role" is missing any of the privileges being removed.  If
          * PrivilegeNotFound is returned then the graph may be in an inconsistent state and needs to
          * be abandoned.
@@ -168,6 +174,7 @@ namespace mongo {
         /**
          * Removes all privileges from "role".
          * Returns RoleNotFound if "role" doesn't exist in the role graph.
+         * Returns InvalidRoleModification if "role" is a built-in role.
          */
         Status removeAllPrivilegesFromRole(const RoleName& role);
 

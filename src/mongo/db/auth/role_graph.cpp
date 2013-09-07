@@ -115,7 +115,7 @@ namespace {
                           0);
         }
         if (_isBuiltinRole(role)) {
-            return Status(ErrorCodes::RoleModificationFailed,
+            return Status(ErrorCodes::InvalidRoleModification,
                           mongoutils::str::stream() << "Cannot delete built-in role: " <<
                                   role.getFullName(),
                           0);
@@ -170,7 +170,7 @@ namespace {
                           0);
         }
         if (_isBuiltinRole(recipient)) {
-            return Status(ErrorCodes::RoleModificationFailed,
+            return Status(ErrorCodes::InvalidRoleModification,
                           mongoutils::str::stream() << "Cannot grant roles to built-in role: " <<
                                   role.getFullName(),
                           0);
@@ -195,7 +195,7 @@ namespace {
                           0);
         }
         if (_isBuiltinRole(recipient)) {
-            return Status(ErrorCodes::RoleModificationFailed,
+            return Status(ErrorCodes::InvalidRoleModification,
                           mongoutils::str::stream() << "Cannot remove roles from built-in role: " <<
                                   role.getFullName(),
                           0);
@@ -249,7 +249,7 @@ namespace {
                           0);
         }
         if (_isBuiltinRole(role)) {
-            return Status(ErrorCodes::RoleModificationFailed,
+            return Status(ErrorCodes::InvalidRoleModification,
                           mongoutils::str::stream() << "Cannot grant privileges to built-in role: "
                                   << role.getFullName(),
                           0);
@@ -290,7 +290,7 @@ namespace {
         }
         if (_isBuiltinRole(role)) {
             return Status(
-                    ErrorCodes::RoleModificationFailed,
+                    ErrorCodes::InvalidRoleModification,
                     mongoutils::str::stream() << "Cannot remove privileges from built-in role: " <<
                             role.getFullName());
         }
@@ -347,7 +347,7 @@ namespace {
         }
         if (_isBuiltinRole(role)) {
             return Status(
-                    ErrorCodes::RoleModificationFailed,
+                    ErrorCodes::InvalidRoleModification,
                     mongoutils::str::stream() << "Cannot remove privileges from built-in role: " <<
                             role.getFullName());
         }
