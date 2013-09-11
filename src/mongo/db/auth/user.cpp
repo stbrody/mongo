@@ -123,22 +123,28 @@ namespace mongo {
     }
 
     void User::addRole(const RoleName& role) {
+        if (_roles.count(role)) {
+            _roles[role].name = role;
+        }
         _roles[role].hasRole = true;
     }
 
     void User::addRoles(const std::vector<RoleName>& roles) {
         for (std::vector<RoleName>::const_iterator it = roles.begin(); it != roles.end(); ++it) {
-            _roles[*it].hasRole = true;
+            addRole(*it);
         }
     }
 
     void User::addDelegatableRole(const RoleName& role) {
+        if (_roles.count(role)) {
+            _roles[role].name = role;
+        }
         _roles[role].canDelegate = true;
     }
 
     void User::addDelegatableRoles(const std::vector<RoleName>& roles) {
         for (std::vector<RoleName>::const_iterator it = roles.begin(); it != roles.end(); ++it) {
-            _roles[*it].canDelegate = true;
+            addDelegatableRole(*it);
         }
     }
 
