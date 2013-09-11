@@ -123,7 +123,7 @@ namespace mongo {
     }
 
     void User::addRole(const RoleName& role) {
-        if (_roles.count(role)) {
+        if (!_roles.count(role)) {
             _roles[role].name = role;
         }
         _roles[role].hasRole = true;
@@ -136,7 +136,7 @@ namespace mongo {
     }
 
     void User::addDelegatableRole(const RoleName& role) {
-        if (_roles.count(role)) {
+        if (!_roles.count(role)) {
             _roles[role].name = role;
         }
         _roles[role].canDelegate = true;
