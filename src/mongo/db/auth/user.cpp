@@ -23,8 +23,58 @@
 #include "mongo/db/auth/user_name.h"
 #include "mongo/platform/atomic_word.h"
 #include "mongo/util/assert_util.h"
+#include "db/auth/role_name.h"
 
 namespace mongo {
+
+//namespace {
+//    // RoleNameIterator for iterating over a RoleMap.
+//    class RoleNameMapIterator : public RoleNameIterator::Impl {
+//        MONGO_DISALLOW_COPYING(RoleNameMapIterator);
+//
+//    public:
+//        RoleNameMapIterator(const unordered_map<RoleName, User::RoleData>::const_iterator& begin,
+//                            const unordered_map<RoleName, User::RoleData>::const_iterator& end,
+//                            bool returnDelegatableRoles) :
+//                _begin(begin), _end(end), _returnDelegatableRoles(returnDelegatableRoles) {
+//            _progressToNext();
+//        }
+//
+//        virtual ~RoleNameMapIterator() {};
+//
+//        virtual bool more() const { return _begin != _end; }
+//
+//        virtual const RoleName& next() {
+//            const RoleName& toReturn = get();
+//            _progressToNext();
+//            return toReturn;
+//        }
+//
+//        virtual const RoleName& get() const {
+//            return _begin->second.name;
+//        }
+//
+//    private:
+//        virtual Impl* doClone() const {
+//            return new RoleNameMapIterator(_begin, _end, _returnDelegatableRoles);
+//        }
+//
+//        void _progressToNext() {
+//            while (_begin != _end &&
+//                   _returnDelegatableRoles ? !_begin->second.canDelegate :
+//                                             !_begin->second.hasRole) {
+//                ++_begin;
+//            }
+//        }
+//
+//
+//        unordered_map<RoleName, User::RoleData>::const_iterator _begin;
+//        unordered_map<RoleName, User::RoleData>::const_iterator _end;
+//        // If true returns the names of roles the user can delegate rather than roles the user
+//        // actually has privileges on.
+//        bool _returnDelegatableRoles;
+//    };
+//} // namespace
 
     User::User(const UserName& name) : _name(name), _refCount(0), _isValid(1) {}
     User::~User() {
@@ -35,17 +85,8 @@ namespace mongo {
         return _name;
     }
 
-    const RoleNameIterator User::getRoles() const {
-        return RoleNameIterator(new RoleNameSetIterator(_roles.begin(), _roles.end()));
-    }
-
-    const RoleNameIterator User::getDelegatableRoles() const {
-        return RoleNameIterator(new RoleNameSetIterator(_delegatableRoles.begin(),
-                                                        _delegatableRoles.end()));
-    }
-
-    bool User::canDelegateRole(const RoleName& role) const {
-        return _delegatableRoles.count(role);
+    const User::RoleDataMap& User::getRoles() const {
+        return _roles;
     }
 
     const User::CredentialData& User::getCredentials() const {
@@ -82,22 +123,22 @@ namespace mongo {
     }
 
     void User::addRole(const RoleName& role) {
-        _roles.insert(role);
+        _roles[role].hasRole = true;
     }
 
     void User::addRoles(const std::vector<RoleName>& roles) {
         for (std::vector<RoleName>::const_iterator it = roles.begin(); it != roles.end(); ++it) {
-            _roles.insert(*it);
+            _roles[*it].hasRole = true;
         }
     }
 
     void User::addDelegatableRole(const RoleName& role) {
-        _delegatableRoles.insert(role);
+        _roles[role].canDelegate = true;
     }
 
     void User::addDelegatableRoles(const std::vector<RoleName>& roles) {
         for (std::vector<RoleName>::const_iterator it = roles.begin(); it != roles.end(); ++it) {
-            _delegatableRoles.insert(*it);
+            _roles[*it].canDelegate = true;
         }
     }
 
