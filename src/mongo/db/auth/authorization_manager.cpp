@@ -194,6 +194,30 @@ namespace mongo {
         return status;
     }
 
+    Status AuthorizationManager::updateRoleDocument(const RoleName& role,
+                                                    const BSONObj& updateObj,
+                                                    const BSONObj& writeConcern) const {
+        Status status = _externalState->updateOne(
+                NamespaceString("admin.system.roles"),
+                BSON(AuthorizationManager::ROLE_NAME_FIELD_NAME << role.getRole() <<
+                     AuthorizationManager::ROLE_SOURCE_FIELD_NAME << role.getDB()),
+                updateObj,
+                false,
+                writeConcern);
+        if (status.isOK()) {
+            return status;
+        }
+        if (status.code() == ErrorCodes::NoMatchingDocument) {
+            return Status(ErrorCodes::RoleNotFound,
+                          mongoutils::str::stream() << "Role " << role.getFullName() <<
+                                  " not found");
+        }
+        if (status.code() == ErrorCodes::UnknownError) {
+            return Status(ErrorCodes::RoleModificationFailed, status.reason());
+        }
+        return status;
+    }
+
     Status AuthorizationManager::queryAuthzDocument(
             const NamespaceString& collectionName,
             const BSONObj& query,
@@ -204,6 +228,25 @@ namespace mongo {
     bool AuthorizationManager::roleExists(const RoleName& role) {
         boost::lock_guard<boost::mutex> lk(_lock);
         return _roleGraph.roleExists(role);
+    }
+
+    const PrivilegeVector& AuthorizationManager::getDirectPrivilegesForRole(const RoleName& role) {
+        boost::lock_guard<boost::mutex> lk(_lock);
+        return _roleGraph.getDirectPrivileges(role);
+    }
+
+    Status AuthorizationManager::getBSONForPrivileges(const PrivilegeVector& privileges,
+                                                      mutablebson::Element resultArray) {
+        for (PrivilegeVector::const_iterator it = privileges.begin();
+                it != privileges.end(); ++it) {
+            std::string errmsg;
+            ParsedPrivilege privilege;
+            if (!ParsedPrivilege::privilegeToParsedPrivilege(*it, &privilege, &errmsg)) {
+                return Status(ErrorCodes::BadValue, errmsg);
+            }
+            resultArray.appendObject("privileges", privilege.toBSON());
+        }
+        return Status::OK();
     }
 
     Status AuthorizationManager::getBSONForRole(RoleGraph* graph,
@@ -224,14 +267,9 @@ namespace mongo {
                 result.getDocument().makeElementArray("privileges");
         result.pushBack(privilegesArrayElement);
         const PrivilegeVector& privileges = graph->getDirectPrivileges(roleName);
-        for (PrivilegeVector::const_iterator it = privileges.begin();
-                it != privileges.end(); ++it) {
-            std::string errmsg;
-            ParsedPrivilege privilege;
-            if (!ParsedPrivilege::privilegeToParsedPrivilege(*it, &privilege, &errmsg)) {
-                return Status(ErrorCodes::BadValue, errmsg);
-            }
-            privilegesArrayElement.appendObject("privileges", privilege.toBSON());
+        Status status = getBSONForPrivileges(privileges, privilegesArrayElement);
+        if (!status.isOK()) {
+            return status;
         }
 
         // Build roles array

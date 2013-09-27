@@ -34,6 +34,7 @@
 #include "mongo/base/status.h"
 #include "mongo/bson/mutable/algorithm.h"
 #include "mongo/bson/mutable/document.h"
+#include "mongo/bson/mutable/element.h"
 #include "mongo/bson/util/bson_extract.h"
 #include "mongo/client/dbclientinterface.h"
 #include "mongo/db/auth/action_set.h"
@@ -904,4 +905,102 @@ namespace mongo {
         }
 
     } cmdCreateRole;
+
+    class CmdGrantPrivilegeToRole: public Command {
+    public:
+
+        CmdGrantPrivilegeToRole() : Command("grantPrivilegesToRole") {}
+
+        virtual bool logTheOp() {
+            return false;
+        }
+
+        virtual bool slaveOk() const {
+            return false;
+        }
+
+        virtual LockType locktype() const {
+            return NONE;
+        }
+
+        virtual void help(stringstream& ss) const {
+            ss << "Grants privileges to a role" << endl;
+        }
+
+        virtual void addRequiredPrivileges(const std::string& dbname,
+                                           const BSONObj& cmdObj,
+                                           std::vector<Privilege>* out) {
+            // TODO: update this with the new rules around user creation in 2.6.
+            ActionSet actions;
+            actions.addAction(ActionType::userAdmin);
+            out->push_back(Privilege(ResourcePattern::forDatabaseName(dbname), actions));
+        }
+
+        bool run(const string& dbname,
+                 BSONObj& cmdObj,
+                 int options,
+                 string& errmsg,
+                 BSONObjBuilder& result,
+                 bool fromRepl) {
+            AuthorizationManager* authzManager = getGlobalAuthorizationManager();
+            AuthzDocumentsUpdateGuard updateGuard(authzManager);
+            if (!updateGuard.tryLock("Grant privileges to role")) {
+                addStatus(Status(ErrorCodes::LockBusy, "Could not lock auth data update lock."),
+                          result);
+                return false;
+            }
+
+            RoleName roleName;
+            PrivilegeVector privilegesToAdd;
+            BSONObj writeConcern;
+            Status status =
+                    auth::parseAndValidateRolePrivilegeManipulationCommands(cmdObj,
+                                                                            "grantPrivilegesToRole",
+                                                                            dbname,
+                                                                            &roleName,
+                                                                            &privilegesToAdd,
+                                                                            &writeConcern);
+            if (!status.isOK()) {
+                addStatus(status, result);
+                return false;
+            }
+            // TODO: move this logic into parser
+
+            if (!authzManager->roleExists(roleName)) {
+                addStatus(Status(ErrorCodes::RoleNotFound,
+                                 mongoutils::str::stream() << roleName.getFullName() <<
+                                         " does not name an existing role"),
+                          result);
+                return false;
+            }
+
+            PrivilegeVector privileges = authzManager->getDirectPrivilegesForRole(roleName);
+            for (PrivilegeVector::iterator it = privilegesToAdd.begin();
+                    it != privilegesToAdd.end(); ++it) {
+                Privilege::addPrivilegeToPrivilegeVector(&privileges, *it);
+            }
+
+            mutablebson::Document doc; // why do I need this to create an Element?
+            mutablebson::Element privilegesElement = doc.makeElementArray("privileges");
+            status = authzManager->getBSONForPrivileges(privileges, privilegesElement);
+            if (!status.isOK()) {
+                addStatus(status, result);
+                return false;
+            }
+
+            BSONArrayBuilder privilegesBSONBuilder;
+            privilegesElement.writeArrayTo(&privilegesBSONBuilder);
+            status = authzManager->updateRoleDocument(
+                    roleName,
+                    BSON("$set" << BSON("privileges" << BSONArray(privilegesBSONBuilder.done()))),
+                    writeConcern);
+            if (!status.isOK()) {
+                addStatus(status, result);
+                return false;
+            }
+
+            return true;
+        }
+
+    } cmdGrantPrivilegeToRole;
 }
