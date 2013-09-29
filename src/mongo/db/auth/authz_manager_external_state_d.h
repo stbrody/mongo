@@ -86,6 +86,8 @@ namespace mongo {
                                       const BSONObj& writeConcern);
         virtual bool tryAcquireAuthzUpdateLock(const StringData& why);
         virtual void releaseAuthzUpdateLock();
+        virtual OpTime getCurrentOpTime();
+        virtual const NamespaceString& getOplogCollectionName();
 
     protected:
         virtual Status _findUser(const string& usersNamespace,

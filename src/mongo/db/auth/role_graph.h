@@ -32,6 +32,7 @@
 #include <vector>
 
 #include "mongo/base/status.h"
+#include "mongo/bson/mutable/element.h"
 #include "mongo/db/auth/privilege.h"
 #include "mongo/db/auth/role_name.h"
 #include "mongo/platform/unordered_map.h"
@@ -141,6 +142,13 @@ namespace mongo {
          * Returns InvalidRoleModification if "role" is a built-in role.
          */
         Status removeRoleFromRole(const RoleName& recipient, const RoleName& role);
+
+        /**
+         * Removes all roles held by "victim".
+         * Returns RoleNotFound if "victim" doesn't exist in the role graph.
+         * Returns InvalidRoleModification if "victim" is a built-in role.
+         */
+        Status removeAllRolesFromRole(const RoleName& victim);
 
         /**
          * Grants "privilegeToAdd" to "role".

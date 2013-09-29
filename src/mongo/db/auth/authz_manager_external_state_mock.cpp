@@ -122,11 +122,16 @@ namespace mongo {
         if (!status.isOK()) {
             return status;
         }
-        for (std::vector<BSONObjCollection::iterator>::iterator it = iterVector.begin();
-                it != iterVector.end(); ++it) {
-            resultProcessor(**it);
+        try {
+            for (std::vector<BSONObjCollection::iterator>::iterator it = iterVector.begin();
+                 it != iterVector.end(); ++it) {
+                resultProcessor(**it);
+            }
         }
-        return Status::OK();
+        catch (const DBException& ex) {
+            status = ex.toStatus();
+        }
+        return status;
     }
 
     Status AuthzManagerExternalStateMock::insert(
@@ -243,6 +248,17 @@ namespace mongo {
     }
 
     void AuthzManagerExternalStateMock::releaseAuthzUpdateLock() {}
+
+    OpTime AuthzManagerExternalStateMock::getCurrentOpTime() {
+        mongo::mutex::scoped_lock lk(OpTime::m);
+        return OpTime::now(lk);
+    }
+
+    static const NamespaceString oplogCollectionName("local.oplog.rs");
+
+    const NamespaceString& AuthzManagerExternalStateMock::getOplogCollectionName() {
+        return oplogCollectionName;
+    }
 
     std::vector<BSONObj> AuthzManagerExternalStateMock::getCollectionContents(
             const NamespaceString& collectionName) {

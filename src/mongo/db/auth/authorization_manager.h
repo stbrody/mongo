@@ -37,7 +37,6 @@
 #include "mongo/base/status.h"
 #include "mongo/bson/mutable/element.h"
 #include "mongo/db/auth/action_set.h"
-#include "mongo/db/auth/authz_manager_external_state.h"
 #include "mongo/db/auth/resource_pattern.h"
 #include "mongo/db/auth/role_graph.h"
 #include "mongo/db/auth/user.h"
@@ -48,6 +47,7 @@
 
 namespace mongo {
 
+    class AuthzManagerExternalState;
     class UserDocumentParser;
 
     /**
@@ -283,7 +283,31 @@ namespace mongo {
          */
         Status upgradeAuthCollections();
 
+        /**
+         * Initializes the role graph from the contents of the admin.system.roles collection.
+         * Blocks until some consistent state is reached.
+         */
+        Status initializeRoleGraph();
+
+        /**
+         * Hook called by replication code to let the AuthorizationManager observe changes
+         * to relevant collections.
+         */
+        void logOp(const char* opstr,
+                   const char* ns,
+                   const BSONObj& obj,
+                   BSONObj* patt,
+                   bool* b,
+                   bool fromMigrate,
+                   const BSONObj* fullObj);
+
     private:
+
+        enum RoleGraphState {
+            roleGraphStateInitial = 0,
+            roleGraphStateConsistent,
+            roleGraphStateHasCycle
+        };
 
         Status _acquireUser_inlock(const UserName& userName, User** acquiredUser);
 
@@ -348,14 +372,23 @@ namespace mongo {
         unordered_map<UserName, User*> _userCache;
 
         /**
-         * Stores a full representation of all roles in the system (both user-defined and built-in)
+         * Eventually consistent, in-memory representation of all roles in the system (both
+         * user-defined and built-in).
          */
         RoleGraph _roleGraph;
 
+        RoleGraphState _roleGraphState;
+
         /**
-         * Protects _userCache, _roleGraph, _version, and _parser.
+         * Protects _userCache, _roleGraph, _roleGraphState, _version, and _parser.
          */
         boost::mutex _lock;
+
+        /**
+         * Forms a critical section within AuthorizationManager::initializeRoleGraph().
+         * Never acquire this mutex while holding _lock.
+         */
+        boost::mutex _initializeRoleGraphMutex;
     };
 
 } // namespace mongo

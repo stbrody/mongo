@@ -189,6 +189,17 @@ namespace mongo {
          */
         virtual void releaseAuthzUpdateLock() = 0;
 
+        /**
+         * Fetches an OpTime no earlier than the most recent one written to the oplog returned by
+         * getOplogCollectionName().
+         */
+        virtual OpTime getCurrentOpTime() = 0;
+
+        /**
+         * Returns the name of the oplog collection.
+         */
+        virtual const NamespaceString& getOplogCollectionName() = 0;
+
     protected:
         AuthzManagerExternalState(); // This class should never be instantiated directly.
 

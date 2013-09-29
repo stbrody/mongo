@@ -296,4 +296,15 @@ namespace {
         _authzDataUpdateLock.reset();
     }
 
+    OpTime AuthzManagerExternalStateMongos::getCurrentOpTime() {
+        mongo::mutex::scoped_lock lk(OpTime::m);
+        return OpTime::now(lk);
+    }
+
+    static const NamespaceString oplogCollectionName("local.oplog.rs");
+
+    const NamespaceString& AuthzManagerExternalStateMongos::getOplogCollectionName() {
+        return oplogCollectionName;
+    }
+
 } // namespace mongo

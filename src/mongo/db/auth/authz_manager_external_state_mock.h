@@ -113,6 +113,9 @@ namespace mongo {
                                       const BSONObj& writeConcern);
         virtual bool tryAcquireAuthzUpdateLock(const StringData& why);
         virtual void releaseAuthzUpdateLock();
+        virtual OpTime getCurrentOpTime();
+        virtual const NamespaceString& getOplogCollectionName();
+
 
         std::vector<BSONObj> getCollectionContents(const NamespaceString& collectionName);
 
