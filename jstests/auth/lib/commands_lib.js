@@ -1501,7 +1501,7 @@ var authCommandsLib = {
             ]
         },
         {
-            testname: "renameCollection_sameDb",
+            testname: "renameCollection_sameDb1",
             command: {renameCollection: firstDbName + ".x", to: firstDbName + ".y"},
             setup: function (db) { db.getSisterDB(firstDbName).x.save( {} ); },
             teardown: function (db) {
@@ -1514,6 +1514,28 @@ var authCommandsLib = {
                     rolesAllowed: roles_writeDbAdmin,
                     requiredPrivileges: [
                         { resource: {db: firstDbName, collection: ""}, actions: ["renameCollectionSameDB"] }
+                    ]
+                },
+                { runOnDb: firstDbName, rolesAllowed: {} },
+                { runOnDb: secondDbName, rolesAllowed: {} }
+            ]
+        },
+        {
+            testname: "renameCollection_sameDb2",
+            command: {renameCollection: firstDbName + ".x", to: firstDbName + ".y", dropTarget: true},
+            setup: function (db) { db.getSisterDB(firstDbName).x.save( {} ); },
+            teardown: function (db) {
+                db.getSisterDB(firstDbName).x.drop();
+                db.getSisterDB(firstDbName).y.drop();
+            },
+            testcases: [
+                {
+                    runOnDb: adminDbName,
+                    rolesAllowed: roles_writeDbAdmin,
+                    requiredPrivileges: [
+                        { resource: {db: firstDbName, collection: ""}, actions: ["renameCollectionSameDB"] },
+                        { resource: {db: firstDbName, collection: "x"}, actions: ["find"] },
+                        { resource: {db: firstDbName, collection: "y"}, actions: ["find", "dropCollection"] }
                     ]
                 },
                 { runOnDb: firstDbName, rolesAllowed: {} },
