@@ -72,6 +72,10 @@ namespace mongo {
         options->addOptionChaining("forceTableScan", "forceTableScan", moe::Switch,
                 "force a table scan (do not use $snapshot)");
 
+        options->addOptionChaining("dumpDbUsersAndRoles", "dumpDbUsersAndRoles", moe::Switch,
+                "Dump user and role definitions for the given database")
+                        .requires("db").incompatibleWith("collection");
+
         options->addOptionChaining("listExtents", "listExtents", moe::Switch,
                 "list extents for given db collection").requires("dbpath")
                                   .requires("collection").requires("db").hidden();
@@ -144,6 +148,11 @@ namespace mongo {
         if (!params.count("db")) {
             toolGlobalParams.db = "";
         }
+
+        // Always dump users and roles if doing a full dump.  If doing a db dump, only dump users
+        // and roles if --dumpDbUsersAndRoles provided
+        mongoDumpGlobalParams.dumpUsersAndRoles = hasParam("dumpDbUsersAndRoles") ||
+                (toolGlobalParams.db == "" && toolGlobalParams.coll == "");
 
         if (mongoDumpGlobalParams.outputDirectory == "-") {
             // write output to standard error to avoid mangling output

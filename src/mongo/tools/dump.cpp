@@ -34,7 +34,10 @@
 #include <fstream>
 #include <map>
 
+#include "mongo/base/status.h"
+#include "mongo/client/auth_helpers.h"
 #include "mongo/client/dbclientcursor.h"
+#include "mongo/db/auth/authorization_manager.h"
 #include "mongo/db/db.h"
 #include "mongo/db/namespace_string.h"
 #include "mongo/db/catalog/collection.h"
@@ -85,9 +88,7 @@ public:
         ProgressMeter* _m;
     };
 
-    void doCollection( const string coll , FILE* out , ProgressMeter *m ) {
-        Query q = _query;
-
+    void doCollection( const string coll , Query q, FILE* out , ProgressMeter *m ) {
         int queryOptions = QueryOption_SlaveOk | QueryOption_NoCursorTimeout;
         if (startsWith(coll.c_str(), "local.oplog."))
             queryOptions |= QueryOption_OplogReplay;
@@ -113,7 +114,7 @@ public:
         }
     }
 
-    void writeCollectionFile( const string coll , boost::filesystem::path outputFile ) {
+    void writeCollectionFile( const string coll , Query q, boost::filesystem::path outputFile ) {
         toolInfoLog() << "\t" << coll << " to " << outputFile.string() << std::endl;
 
         FilePtr f (fopen(outputFile.string().c_str(), "wb"));
@@ -123,7 +124,7 @@ public:
         m.setName("Collection File Writing Progress");
         m.setUnits("objects");
 
-        doCollection(coll, f, &m);
+        doCollection(coll, q, f, &m);
 
         toolInfoLog() << "\t\t " << m.done() << " objects" << std::endl;
     }
@@ -163,10 +164,10 @@ public:
 
 
     void writeCollectionStdout( const string coll ) {
-        doCollection(coll, stdout, NULL);
+        doCollection(coll, _query, stdout, NULL);
     }
 
-    void go( const string db , const boost::filesystem::path outdir ) {
+    void go(const string db, const string coll, Query query, const boost::filesystem::path outdir) {
         toolInfoLog() << "DATABASE: " << db << "\t to \t" << outdir.string() << std::endl;
 
         boost::filesystem::create_directories( outdir );
@@ -194,7 +195,7 @@ public:
             }
 
             // skip namespaces with $ in them only if we don't specify a collection to dump
-            if (toolGlobalParams.coll == "" && name.find(".$") != string::npos) {
+            if (coll == "" && name.find(".$") != string::npos) {
                 if (logger::globalLogDomain()->shouldLog(logger::LogSeverity::Debug(1))) {
                     toolInfoLog() << "\tskipping collection: " << name << std::endl;
                 }
@@ -204,9 +205,7 @@ public:
             const string filename = name.substr( db.size() + 1 );
 
             //if a particular collections is specified, and it's not this one, skip it
-            if (toolGlobalParams.coll != "" &&
-                db + "." + toolGlobalParams.coll != name &&
-                toolGlobalParams.coll != name) {
+            if (coll != "" && db + "." + coll != name && coll != name) {
                 continue;
             }
 
@@ -221,18 +220,23 @@ public:
             if (nsToCollectionSubstring(name) == "system.indexes") {
               // Create system.indexes.bson for compatibility with pre 2.2 mongorestore
               const string filename = name.substr( db.size() + 1 );
-              writeCollectionFile( name.c_str() , outdir / ( filename + ".bson" ) );
+              writeCollectionFile( name.c_str() , query, outdir / ( filename + ".bson" ) );
               // Don't dump indexes as *.metadata.json
               continue;
             }
-            
+
+            if (nsToCollectionSubstring(name) == "system.users" &&
+                    !mongoDumpGlobalParams.dumpUsersAndRoles) {
+                continue;
+            }
+
             collections.push_back(name);
         }
         
         for (vector<string>::iterator it = collections.begin(); it != collections.end(); ++it) {
             string name = *it;
             const string filename = name.substr( db.size() + 1 );
-            writeCollectionFile( name , outdir / ( filename + ".bson" ) );
+            writeCollectionFile( name , query, outdir / ( filename + ".bson" ) );
             writeMetadataFile( name, outdir / (filename + ".metadata.json"), collectionOptions, indexes);
         }
 
@@ -567,6 +571,11 @@ public:
             }
         }
 
+        if (mongoDumpGlobalParams.dumpUsersAndRoles) {
+            Status status = auth::getRemoteStoredAuthorizationVersion(&conn(true), &authzVersion);
+            uassertStatusOK(status);
+        }
+
         string opLogName = "";
         unsigned long long opLogStart = 0;
         if (mongoDumpGlobalParams.useOplog) {
@@ -646,11 +655,16 @@ public:
                 if ( (string)dbName == "local" )
                     continue;
 
-                go ( dbName , root / dbName );
+                go ( dbName , "", _query, root / dbName );
             }
         }
         else {
-            go(toolGlobalParams.db, root / toolGlobalParams.db);
+            go(toolGlobalParams.db, toolGlobalParams.coll, _query, root / toolGlobalParams.db);
+            if (mongoDumpGlobalParams.dumpUsersAndRoles &&
+                    authzVersion == AuthorizationManager::schemaVersion26Final) {
+                go("admin", "system.users", Query(BSON("db" << toolGlobalParams.db)), root/"admin");
+                go("admin", "system.roles", Query(BSON("db" << toolGlobalParams.db)), root/"admin");
+            }
         }
 
         if (!opLogName.empty()) {
@@ -659,13 +673,14 @@ public:
 
             _query = BSON("ts" << b.obj());
 
-            writeCollectionFile( opLogName , root / "oplog.bson" );
+            writeCollectionFile( opLogName , _query, root / "oplog.bson" );
         }
 
         return 0;
     }
 
     bool _usingMongos;
+    int authzVersion;
     BSONObj _query;
 };
 

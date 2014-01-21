@@ -45,6 +45,7 @@ namespace mongo {
         bool snapShotQuery;
         bool listExtents;
         bool dumpExtent;
+        bool dumpUsersAndRoles;
         std::string diskLoc;
     };
 
