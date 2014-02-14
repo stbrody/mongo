@@ -80,6 +80,7 @@ namespace {
 
     void clearGlobalAuthorizationManager() {
         fassert(16843, globalAuthManager != NULL);
+        delete globalAuthManager;
         globalAuthManager = NULL;
     }
 
