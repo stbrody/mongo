@@ -77,8 +77,10 @@ namespace mongo {
             }
             else {
                 return Status(ErrorCodes::TypeMismatch, mongoutils::str::stream() <<
+                              "Could not determine schema version of authorization data.  "
                               "Bad (non-numeric) type " << versionElement.type() <<
-                              " for " << AuthorizationManager::schemaVersionFieldName <<
+                              " (" << typeName(versionElement.type()) << ") for " <<
+                              AuthorizationManager::schemaVersionFieldName <<
                               " field in version document");
             }
         }

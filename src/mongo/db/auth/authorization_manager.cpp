@@ -256,25 +256,26 @@ namespace mongo {
         }
     }
 
-    int AuthorizationManager::getAuthorizationVersion() {
+    Status AuthorizationManager::getAuthorizationVersion(int* version) {
         CacheGuard guard(this, CacheGuard::fetchSynchronizationManual);
         int newVersion = _version;
+        Status status = Status::OK();
         if (schemaVersionInvalid == newVersion) {
             while (guard.otherUpdateInFetchPhase())
                 guard.wait();
             guard.beginFetchPhase();
-            Status status = _externalState->getStoredAuthorizationVersion(&newVersion);
+            status = _externalState->getStoredAuthorizationVersion(&newVersion);
             guard.endFetchPhase();
             if (status.isOK()) {
                 if (guard.isSameCacheGeneration()) {
                     _version = newVersion;
                 }
-            }
-            else {
-                warning() << "Could not determine schema version of authorization data. " << status;
+            } else {
+                warning() << status;
             }
         }
-        return newVersion;
+        *version = newVersion;
+        return status;
     }
 
     void AuthorizationManager::setSupportOldStylePrivilegeDocuments(bool enabled) {
@@ -1287,7 +1288,12 @@ namespace {
 }  // namespace
 
     Status AuthorizationManager::upgradeSchemaStep(const BSONObj& writeConcern, bool* isDone) {
-        int authzVersion = getAuthorizationVersion();
+        int authzVersion;
+        Status status = getAuthorizationVersion(&authzVersion);
+        if (!status.isOK()) {
+            return status;
+        }
+
         switch (authzVersion) {
         case schemaVersion24:
             *isDone = false;

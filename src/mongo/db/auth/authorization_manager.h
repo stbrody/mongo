@@ -167,9 +167,10 @@ namespace mongo {
         bool isAuthEnabled() const;
 
         /**
-         * Returns the version number of the authorization system.
+         * Returns (in *version) the version number of the authorization system.  Reports any errors
+         * via the returned Status.
          */
-        int getAuthorizationVersion();
+        Status getAuthorizationVersion(int* version);
 
         // Returns true if there exists at least one privilege document in the system.
         bool hasAnyPrivilegeDocuments() const;
