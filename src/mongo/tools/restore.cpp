@@ -64,6 +64,7 @@ public:
     string _curns;
     string _curdb;
     string _curcoll;
+    string _serverBinVersion; // Version identifier of the server we're restoring to
     set<UserName> _users; // Holds users that are already in the cluster when restoring with --drop
     set<RoleName> _roles; // Holds roles that are already in the cluster when restoring with --drop
     scoped_ptr<Matcher> _opmatcher; // For oplog replay
@@ -117,18 +118,30 @@ public:
             return -1;
         }
 
+        {
+            // Store server's version
+            BSONObj out;
+            if (! conn().simpleCommand("admin", &out, "buildinfo")) {
+                toolError() << "buildinfo command failed: "
+                        << out["errmsg"].String() << std::endl;
+                return -1;
+            }
+
+            _serverBinVersion = out["version"].String();
+        }
+
         if (mongoRestoreGlobalParams.restoreUsersAndRoles) {
             storeRemoteAuthzVersion(); // populate _serverAuthzVersion
 
             if (_serverAuthzVersion == AuthorizationManager::schemaVersion26Final) {
-                uassert(17408,
+                uassert(17410,
                         mongoutils::str::stream() << mongoRestoreGlobalParams.tempUsersColl <<
                                 " collection already exists, but is needed to restore user data.  "
                                 "Drop this collection or specify a different collection (via "
                                 "--tempUsersColl) to use to temporarily hold user data during the "
                                 "restore process",
                         !conn().exists(mongoRestoreGlobalParams.tempUsersColl));
-                uassert(17407,
+                uassert(17411,
                         mongoutils::str::stream() << mongoRestoreGlobalParams.tempRolesColl <<
                                 " collection already exists, but is needed to restore role data.  "
                                 "Drop this collection or specify a different collection (via "
@@ -142,12 +155,6 @@ public:
                 // Will populate _dumpFileAuthzVersion
                 processFileAndMetadata(root / "admin" / "system.version.bson",
                                        "admin.system.version");
-                uassert(17371,
-                        mongoutils::str::stream() << "Server's authorization data schema version "
-                                "does not match that of the data in the dump file.  Server's schema"
-                                " version: " << _serverAuthzVersion << ", schema version in dump: "
-                                << _dumpFileAuthzVersion,
-                        _serverAuthzVersion == _dumpFileAuthzVersion);
             } else if (!toolGlobalParams.db.empty()) {
                 // DB-specific restore
                 if (exists(root / "$admin.system.users.bson")) {
@@ -191,15 +198,7 @@ public:
                 return -1;
             }
 
-
-            BSONObj out;
-            if (! conn().simpleCommand("admin", &out, "buildinfo")) {
-                toolError() << "buildinfo command failed: " << out["errmsg"].String() << std::endl;
-                return -1;
-            }
-
-            StringData version = out["version"].valuestr();
-            if (versionCmp(version, "1.7.4-pre-") < 0) {
+            if (versionCmp(_serverBinVersion, "1.7.4-pre-") < 0) {
                 toolError() << "Can only replay oplog to server version >= 1.7.4" << std::endl;
                 return -1;
             }
@@ -617,6 +616,16 @@ public:
             conn().insert(mongoRestoreGlobalParams.tempRolesColl, obj);
         }
         else if (_curcoll == "system.users") {
+            uassert(17409,
+                    mongoutils::str::stream() << "Cannot modify user data on a server with version "
+                            "greater than or equal to 2.5.4 that has not yet updated the "
+                            "authorization data to schema version " <<
+                            AuthorizationManager::schemaVersion26Final <<
+                            ". Found server version " << _serverBinVersion << " with "
+                            "authorization schema version " << _serverAuthzVersion,
+                    versionCmp(_serverBinVersion, "2.5.4") < 0 ||
+                    _serverAuthzVersion == AuthorizationManager::schemaVersion26Final);
+
             if (obj.hasField("credentials")) {
                 if (_serverAuthzVersion == AuthorizationManager::schemaVersion24) {
                     // v3 user, v1 system
@@ -690,6 +699,12 @@ public:
                                                         AuthorizationManager::schemaVersionFieldName,
                                                         &authVersion));
                 _dumpFileAuthzVersion = static_cast<int>(authVersion);
+                uassert(17371,
+                        mongoutils::str::stream() << "Server's authorization data schema version "
+                                "does not match that of the data in the dump file.  Server's schema"
+                                " version: " << _serverAuthzVersion << ", schema version in dump: "
+                                << _dumpFileAuthzVersion,
+                    _serverAuthzVersion == _dumpFileAuthzVersion);
             }
             conn().insert(_curns, obj);
         }
