@@ -103,6 +103,9 @@ function runTest(shutdownServer) {
     assert.eq(1, db.bar.findOne().a);
     assert.eq(0, db.getUsers().length, "Restored users even though it shouldn't have");
     assert.eq(0, db.getRoles().length, "Restored users even though it shouldn't have");
+    assert.eq(0,
+              db.system.users.count(),
+              "Restored legacy system.users collection even thoughit shouldn't have");
 
     jsTestLog("Restore foo database *with* user data");
     mongod = runTool("mongorestore", mongod, shutdownServer, {dir: dumpDir + "foo/",

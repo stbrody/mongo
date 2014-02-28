@@ -402,6 +402,13 @@ public:
             return;
         }
 
+        if (!mongoRestoreGlobalParams.restoreUsersAndRoles &&
+                (root.leaf() == "system.users.bson" || root.leaf() == "system.roles.bson")) {
+            toolInfoLog() << "\t skipping system.users.bson because not running with "
+                    "--restoreDbUsersAndRoles" << std::endl;
+            return;
+        }
+
         if ( ! ( endsWith( root.string().c_str() , ".bson" ) ||
                  endsWith( root.string().c_str() , ".bin" ) ) ) {
             toolError() << "don't know what to do with file [" << root.string() << "]" << std::endl;
