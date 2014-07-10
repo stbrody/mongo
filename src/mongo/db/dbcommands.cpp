@@ -1629,6 +1629,7 @@ namespace mongo {
         BSONObj x = anObjBuilder.done();
         b.appendBuf(x.objdata(), x.objsize());
 
+        log() <<"AAAAAAA"<< endl;
         return true;
     }
 
