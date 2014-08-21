@@ -107,9 +107,10 @@ namespace repl {
                                           Status* result);
 
         // produces a reply to a received electCmd
-        virtual void prepareElectCmdResponse(const Date_t now,
-                                             const BSONObj& cmdObj,
-                                             BSONObjBuilder& result);
+        virtual void prepareElectResponse(const ReplicationExecutor::CallbackData& data,
+                                          const ReplicationCoordinator::ReplSetElectArgs& args,
+                                          const Date_t now,
+                                          BSONObjBuilder* response);
 
         // produces a reply to a heartbeat
         virtual void prepareHeartbeatResponse(const ReplicationExecutor::CallbackData& data,
@@ -189,6 +190,9 @@ namespace repl {
 
         // Sees if a majority number of votes are held by members who are currently "up"
         bool _aMajoritySeemsToBeUp() const;
+
+        // Return true if we are currently primary
+        bool _iAmPrimary() const;
 
         // Returns the total number of votes in the current config
         int _totalVotes() const;
@@ -298,9 +302,10 @@ namespace repl {
 
         // Last vote info from the election
         struct LastVote {
-            LastVote() : when(0), who(0xffffffff) { }
+            LastVote() : when(0), whoID(0xffffffff) { }
             Date_t when;
-            unsigned who;
+            unsigned whoID;
+            HostAndPort whoHostAndPort;
         } _lastVote;
 
 
