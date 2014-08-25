@@ -240,11 +240,9 @@ namespace {
         _topCoordDriverThread.reset(new boost::thread(stdx::bind(&ReplicationExecutor::run,
                                                                  &_replExecutor)));
 
-        // TODO(spencer): Start this thread once we're no longer starting a SyncSourceFeedback
-        // thread in the Legacy coordinator
-        //_syncSourceFeedbackThread.reset(new boost::thread(
-        //        stdx::bind(&ReplicationCoordinatorExternalState::runSyncSourceFeedback,
-        //                   _externalState.get())));
+        _syncSourceFeedbackThread.reset(new boost::thread(
+                stdx::bind(&ReplicationCoordinatorExternalState::runSyncSourceFeedback,
+                           _externalState.get())));
 
         bool doneLoadingConfig = _startLoadLocalConfig(txn);
         if (doneLoadingConfig) {
@@ -280,7 +278,7 @@ namespace {
         _replExecutor.shutdown();
         _topCoordDriverThread->join(); // must happen outside _mutex
         _externalState->shutdown();
-        // _syncSourceFeedbackThread->join(); // TODO(spencer): put back once the thread is started
+        _syncSourceFeedbackThread->join();
     }
 
     ReplSettings& ReplicationCoordinatorImpl::getSettings() {
@@ -458,9 +456,6 @@ namespace {
             const OperationContext* txn,
             const OpTime& opTime,
             const WriteConcernOptions& writeConcern) {
-        // TODO(spencer): handle killop
-
-
         if (writeConcern.wNumNodes <= 1 && writeConcern.wMode.empty()) {
             // no desired replication check
             return StatusAndDuration(Status::OK(), Milliseconds(0));
@@ -527,8 +522,7 @@ namespace {
     ReplicationCoordinator::StatusAndDuration ReplicationCoordinatorImpl::awaitReplicationOfLastOp(
             const OperationContext* txn,
             const WriteConcernOptions& writeConcern) {
-        // TODO
-        return StatusAndDuration(Status::OK(), Milliseconds(0));
+        return awaitReplication(txn, _getLastOpApplied(), writeConcern);
     }
 
     Status ReplicationCoordinatorImpl::stepDown(OperationContext* txn,
