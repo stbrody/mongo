@@ -50,7 +50,6 @@
 #include "mongo/db/repl/minvalid.h"
 #include "mongo/db/repl/oplog.h"
 #include "mongo/db/repl/repl_coordinator_global.h"
-#include "mongo/db/repl/rs.h"
 #include "mongo/db/repl/rslog.h"
 #include "mongo/db/stats/timer_stats.h"
 #include "mongo/db/operation_context_impl.h"
@@ -545,26 +544,6 @@ namespace {
                     // we have to check this before calling mgr, as we must be a secondary to
                     // become primary
                     tryToGoLiveAsASecondary(&txn, replCoord);
-
-                    // TODO(emilkie): This can be removed once we switch over from legacy;
-                    // this code is what moves 1-node sets to PRIMARY state.
-                    // normally msgCheckNewState gets called periodically, but in a single node
-                    // replset there are no heartbeat threads, so we do it here to be sure.  this is
-                    // relevant if the singleton member has done a stepDown() and needs to come back
-                    // up.
-                    if (theReplSet &&
-                            theReplSet->config().members.size() == 1 &&
-                            theReplSet->myConfig().potentiallyHot()) {
-                        Manager* mgr = theReplSet->mgr;
-                        // When would mgr be null?  During replsettest'ing, in which case we should
-                        // fall through and actually apply ops as if we were a real secondary.
-                        if (mgr) { 
-                            mgr->send(stdx::bind(&Manager::msgCheckNewState, theReplSet->mgr));
-                            sleepsecs(1);
-                            // There should never be ops to sync in a 1-member set, anyway
-                            return;
-                        }
-                    }
                 }
 
                 const int slaveDelaySecs = replCoord->getSlaveDelaySecs().total_seconds();
@@ -604,17 +583,8 @@ namespace {
             OpTime minValid = lastOp["ts"]._opTime();
             setMinValid(&txn, minValid);
 
-            multiApply(ops.getDeque());
 
-            // If we're just testing (no manager), don't keep looping if we exhausted the bgqueue
-            // TODO(spencer): Remove repltest.cpp dbtest or make this work with the new replication
-            // coordinator
-            if (theReplSet && !theReplSet->mgr) {
-                BSONObj op;
-                if (!peek(&op)) {
-                    return;
-                }
-            }
+            multiApply(ops.getDeque());
         }
     }
 

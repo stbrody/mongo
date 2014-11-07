@@ -32,7 +32,7 @@
 
 #include "mongo/platform/basic.h"
 
-#include "mongo/db/repl/connections.h"
+#include "mongo/db/repl/scoped_conn.h"
 
 #include "mongo/db/repl/rslog.h"
 #include "mongo/util/log.h"
@@ -42,6 +42,12 @@ namespace repl {
     // todo rename files
 
     static const int DEFAULT_HEARTBEAT_TIMEOUT_SECS = 10;
+
+    // This is a bitmask with the first bit set. It's used to mark connections that should be kept
+    // open during stepdowns
+    const unsigned ScopedConn::keepOpen = 1;
+    ScopedConn::M& ScopedConn::_map = *(new ScopedConn::M());
+    mutex ScopedConn::mapMutex("ScopedConn::mapMutex");
 
     ScopedConn::ConnectionInfo::ConnectionInfo() : lock("ConnectionInfo"),
                     cc(new DBClientConnection(/*reconnect*/ true,
