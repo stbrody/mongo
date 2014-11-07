@@ -39,6 +39,17 @@
 
 namespace mongo {
 namespace repl {
+    // todo rename files
+
+    static const int DEFAULT_HEARTBEAT_TIMEOUT_SECS = 10;
+
+    ScopedConn::ConnectionInfo::ConnectionInfo() : lock("ConnectionInfo"),
+                    cc(new DBClientConnection(/*reconnect*/ true,
+                                              /*replicaSet*/ 0,
+                                              /*timeout*/ DEFAULT_HEARTBEAT_TIMEOUT_SECS)),
+                    connected(false) {
+                    cc->_logLevel = logger::LogSeverity::Debug(2);
+                }
 
     // we should already be locked...
     bool ScopedConn::connect() {
