@@ -46,6 +46,7 @@
 #include <boost/thread/thread.hpp>
 
 #include "mongo/db/auth/authorization_manager.h"
+#include "mongo/db/auth/authorization_session.h"
 #include "mongo/db/catalog/database_catalog_entry.h"
 #include "mongo/db/catalog/database_holder.h"
 #include "mongo/db/cloner.h"
@@ -1218,7 +1219,7 @@ namespace repl {
                 if ( lk.got() ) {
                     toSleep = 10;
 
-                    replLocalAuth();
+                    txn.getClient()->getAuthorizationSession()->grantInternalAuthorization();
 
                     try {
                         logKeepalive(&txn);
@@ -1240,11 +1241,7 @@ namespace repl {
         Client::initThread("replslave");
 
         OperationContextImpl txn;
-
-        {
-            Lock::GlobalWrite lk(txn.lockState());
-            replLocalAuth();
-        }
+        txn.getClient()->getAuthorizationSession()->grantInternalAuthorization();
 
         while ( 1 ) {
             try {
@@ -1277,10 +1274,7 @@ namespace repl {
         if( !replSettings.slave && !replSettings.master )
             return;
 
-        {
-            Lock::GlobalWrite lk(txn.lockState());
-            replLocalAuth();
-        }
+        txn.getClient()->getAuthorizationSession()->grantInternalAuthorization();
 
         {
             ReplSource temp(&txn); // Ensures local.me is populated
