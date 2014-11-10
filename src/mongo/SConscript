@@ -794,8 +794,6 @@ env.CppUnitTest( "balancer_policy_test" , [ "s/balancer_policy_tests.cpp" ] ,
                          "coredb",
                          "message_server_port"])
 
-env.CppUnitTest("dbclient_rs_test", [ "client/dbclient_rs_test.cpp" ],
-                 LIBDEPS=['clientdriver', 'mocklib'])
 env.CppUnitTest("scoped_db_conn_test", [ "client/scoped_db_conn_test.cpp" ],
                  LIBDEPS=[
                     "coredb",
@@ -1079,7 +1077,6 @@ env.Library('mocklib', [
         'dbtests/mock/mock_dbclient_connection.cpp',
         'dbtests/mock/mock_dbclient_cursor.cpp',
         'dbtests/mock/mock_remote_db_server.cpp',
-        'dbtests/mock/mock_replica_set.cpp'
     ],
     LIBDEPS=['clientdriver'])
 
