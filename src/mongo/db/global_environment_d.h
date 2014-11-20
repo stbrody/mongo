@@ -60,6 +60,8 @@ namespace mongo {
 
         bool killOperation(unsigned int opId);
 
+        bool killOperation_inlock(unsigned int opId);
+
         void registerKillOpListener(KillOpListenerInterface* listener);
 
         void registerOperationContext(OperationContext* txn);

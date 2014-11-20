@@ -115,6 +115,11 @@ namespace mongo {
         virtual bool killOperation(unsigned int opId) = 0;
 
         /**
+         * Same as killOperation but doesn't acquire Client::clientsMutex.
+         */
+        virtual bool killOperation_inlock(unsigned int opId) = 0;
+
+        /**
          * Registers a listener to be notified each time an op is killed.
          *
          * listener does not become owned by the environment. As there is currently no way to

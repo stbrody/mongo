@@ -60,6 +60,10 @@ namespace mongo {
     }
 
     bool GlobalEnvironmentNoop::killOperation(unsigned int opId) {
+        return killOperation_inlock(opId);
+    }
+
+    bool GlobalEnvironmentNoop::killOperation_inlock(unsigned int opId) {
         return false;
     }
 

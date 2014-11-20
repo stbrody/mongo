@@ -127,6 +127,10 @@ namespace mongo {
 
     bool GlobalEnvironmentMongoD::killOperation(unsigned int opId) {
         boost::mutex::scoped_lock clientLock(Client::clientsMutex);
+        return killOperation_inlock(opId);
+    }
+
+    bool GlobalEnvironmentMongoD::killOperation_inlock(unsigned int opId) {
         bool found = false;
 
         // XXX clean up
