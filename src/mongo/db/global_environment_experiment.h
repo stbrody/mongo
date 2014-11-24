@@ -115,9 +115,10 @@ namespace mongo {
         virtual bool killOperation(unsigned int opId) = 0;
 
         /**
-         * Same as killOperation but doesn't acquire Client::clientsMutex.
+         * Kills all operations that have a Client that is associated with an incoming user
+         * connection, except for the one associated with txn.
          */
-        virtual bool killOperation_inlock(unsigned int opId) = 0;
+        virtual void killAllUserOperations(const OperationContext* txn) = 0;
 
         /**
          * Registers a listener to be notified each time an op is killed.

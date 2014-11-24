@@ -229,27 +229,9 @@ namespace {
 
     void ReplicationCoordinatorExternalStateImpl::killAllUserOperations(OperationContext* txn) {
         GlobalEnvironmentExperiment* environment = getGlobalEnvironment();
-        boost::mutex::scoped_lock scopedLock(Client::clientsMutex);
-        for (ClientSet::const_iterator i = Client::clients.begin();
-                i != Client::clients.end(); i++) {
-
-            Client* client = *i;
-            invariant(client);
-            if (!client->isFromUserConnection()) {
-                // Don't kill system operations.
-                continue;
-            }
-
-            if (client->curop()->opNum() == txn->getOpID()) {
-                // Don't kill ourself.
-                continue;
-            }
-            // TODO(spencer): Only kill write operations, not reads, once there's a way to
-            // distinguish them.
-
-            bool found = environment->killOperation_inlock(client->curop()->opNum());
-            invariant(found);
-        }
+        // TODO(spencer): Only kill write operations, not reads, once there's a way to
+        // distinguish them.
+        environment->killAllUserOperations(txn);
     }
 
     void ReplicationCoordinatorExternalStateImpl::clearShardingState() {

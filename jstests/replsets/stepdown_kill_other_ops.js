@@ -1,12 +1,4 @@
-// Ensure that stepDown kills all other running operations TODO FINISH THIS
-// 1. Start up a 3 node set (1 arbiter).
-// 2. Isolate the SECONDARY.
-// 3. Do one write and then spin up a second shell which asks the PRIMARY to StepDown.
-// 4. Once StepDown has begun, spin up a third shell which will attempt to do writes, which should
-//    block waiting for stepDown to release its lock, which it never will do because no secondaries
-//    are caught up.
-// 5. Once a write is blocked, kill the stepDown operation
-// 6. Writes should become unblocked and the primary should stay primary
+// SERVER-15310 Ensure that stepDown kills all other running operations
 
 (function () {
      "use strict";

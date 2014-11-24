@@ -125,35 +125,17 @@ namespace mongo {
         return _globalKill;
     }
 
-    bool GlobalEnvironmentMongoD::killOperation(unsigned int opId) {
-        boost::mutex::scoped_lock clientLock(Client::clientsMutex);
-        return killOperation_inlock(opId);
-    }
+    bool GlobalEnvironmentMongoD::_killOperationsAssociatedWithClientAndOpId(Client* client,
+                                                                             unsigned int opId) {
+        for( CurOp *k = client->curop(); k; k = k->parent() ) {
+            if ( k->opNum() != opId )
+                continue;
 
-    bool GlobalEnvironmentMongoD::killOperation_inlock(unsigned int opId) {
-        bool found = false;
-
-        // XXX clean up
-        {
-            for(ClientSet::const_iterator j = Client::clients.begin();
-                 !found && j != Client::clients.end();
-                 ++j ) {
-
-                for( CurOp *k = ( *j )->curop(); !found && k; k = k->parent() ) {
-                    if ( k->opNum() != opId )
-                        continue;
-
-                    k->kill();
-                    for( CurOp *l = ( *j )->curop(); l; l = l->parent() ) {
-                        l->kill();
-                    }
-
-                    found = true;
-                }
+            k->kill();
+            for( CurOp *l = client->curop(); l; l = l->parent() ) {
+                l->kill();
             }
-        }
 
-        if (found) {
             for (size_t i = 0; i < _killOpListeners.size(); i++) {
                 try {
                     _killOpListeners[i]->interrupt(opId);
@@ -162,8 +144,51 @@ namespace mongo {
                     std::terminate();
                 }
             }
+            return true;
         }
+        return false;
+    }
+
+    bool GlobalEnvironmentMongoD::killOperation(unsigned int opId) {
+        boost::mutex::scoped_lock clientLock(Client::clientsMutex);
+        bool found = false;
+
+        {
+            for(ClientSet::const_iterator j = Client::clients.begin();
+                 !found && j != Client::clients.end();
+                 ++j ) {
+
+                Client* client = *j;
+
+                bool res = _killOperationsAssociatedWithClientAndOpId(client, opId);
+                found = found || res;
+            }
+        }
+
         return found;
+    }
+
+    void GlobalEnvironmentMongoD::killAllUserOperations(const OperationContext* txn) {
+        boost::mutex::scoped_lock scopedLock(Client::clientsMutex);
+        for (ClientSet::const_iterator i = Client::clients.begin();
+                i != Client::clients.end(); i++) {
+
+            Client* client = *i;
+            invariant(client);
+            if (!client->isFromUserConnection()) {
+                // Don't kill system operations.
+                continue;
+            }
+
+            if (client->curop()->opNum() == txn->getOpID()) {
+                // Don't kill ourself.
+                continue;
+            }
+
+            bool found = _killOperationsAssociatedWithClientAndOpId(client,
+                                                                    client->curop()->opNum());
+            invariant(found);
+        }
     }
 
     void GlobalEnvironmentMongoD::unsetKillAllOperations() {
