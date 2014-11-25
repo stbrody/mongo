@@ -32,7 +32,7 @@ from buildscripts import moduleconfig
 
 import libdeps
 
-EnsureSConsVersion( 2, 3, 0 )
+EnsureSConsVersion( 1, 1, 0 )
 
 def findSettingsSetup():
     sys.path.append( "." )
