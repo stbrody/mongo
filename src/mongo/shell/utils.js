@@ -159,7 +159,8 @@ jsTestOptions = function(){
                               adminUser : TestData.adminUser || "admin",
                               adminPassword : TestData.adminPassword || "password",
                               useSSL : TestData.useSSL,
-                              useX509 : TestData.useX509});
+                              useX509 : TestData.useX509,
+                              mongod_write_conflict_frequency : TestData.mongod_write_conflict_frequency});
     }
     return _jsTestOptions;
 }

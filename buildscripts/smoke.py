@@ -266,6 +266,12 @@ class mongod(NullMongod):
         if not self.did_mongod_start(self.port):
             raise Exception("Failed to start mongod")
 
+        if mongod_write_conflict_frequency > 0.0:
+            conn = Connection(port=self.port)
+            conn.admin.command('configureFailPoint',
+                               'WTWriteConflictException',
+                               mode={'activationProbability': mongod_write_conflict_frequency});
+
         if self.slave:
             local = Connection(port=self.port, slave_okay=True).local
             synced = False
@@ -590,7 +596,9 @@ def runTest(test, result):
                      'TestData.authMechanism = ' + ternary( authMechanism,
                                                '"' + str(authMechanism) + '"', 'null') + ";" + \
                      'TestData.useSSL = ' + ternary( use_ssl ) + ";" + \
-                     'TestData.useX509 = ' + ternary( use_x509 ) + ";"
+                     'TestData.useX509 = ' + ternary( use_x509 ) + ";" + \
+                     'TestData.mongod_write_conflict_frequency = ' + str(mongod_write_conflict_frequency) + ";"
+
         # this updates the default data directory for mongod processes started through shell (src/mongo/shell/servers.js)
         evalString += 'MongoRunner.dataDir = "' + os.path.abspath(smoke_db_prefix + '/data/db') + '";'
         evalString += 'MongoRunner.dataPath = MongoRunner.dataDir + "/";'
@@ -703,7 +711,8 @@ def run_tests(tests):
                             authMechanism=authMechanism,
                             keyFile=keyFile,
                             use_ssl=use_ssl,
-                            use_x509=use_x509)
+                            use_x509=use_x509,
+                            mongod_write_conflict_frequency=mongod_write_conflict_frequency)
             master.start()
 
         if small_oplog:
@@ -714,7 +723,8 @@ def run_tests(tests):
                            wiredtiger_engine_config_string=wiredtiger_engine_config_string,
                            wiredtiger_collection_config_string=wiredtiger_collection_config_string,
                            wiredtiger_index_config_string=wiredtiger_index_config_string,
-                           set_parameters=set_parameters)
+                           set_parameters=set_parameters,
+                           mongod_write_conflict_frequency=mongod_write_conflict_frequency)
             slave.start()
         elif small_oplog_rs:
             slave = mongod(slave=True,
@@ -731,7 +741,8 @@ def run_tests(tests):
                            authMechanism=authMechanism,
                            keyFile=keyFile,
                            use_ssl=use_ssl,
-                           use_x509=use_x509)
+                           use_x509=use_x509,
+                           mongod_write_conflict_frequency=mongod_write_conflict_frequency)
             slave.start()
             primary = Connection(port=master.port, slave_okay=True);
 
@@ -813,7 +824,8 @@ def run_tests(tests):
                                         authMechanism=authMechanism,
                                         keyFile=keyFile,
                                         use_ssl=use_ssl,
-                                        use_x509=use_x509)
+                                        use_x509=use_x509,
+                                        mongod_write_conflict_frequency=mongod_write_conflict_frequency)
                         master.start()
 
             except TestFailure, f:
@@ -1101,6 +1113,7 @@ def set_globals(options, tests):
     global temp_path
     global clean_every_n_tests
     global clean_whole_dbroot
+    global mongod_write_conflict_frequency
 
     start_mongod = options.start_mongod
     if hasattr(options, 'use_ssl'):
@@ -1137,6 +1150,7 @@ def set_globals(options, tests):
     auth = options.auth
     authMechanism = options.authMechanism
     keyFile = options.keyFile
+    mongod_write_conflict_frequency = options.mongod_write_conflict_frequency
 
     clean_every_n_tests = options.clean_every_n_tests
     clean_whole_dbroot = options.with_cleanbb
@@ -1358,6 +1372,10 @@ def main():
     parser.add_option('--exclude-tags', dest='exclude_tags', default="", action='store',
                       help='Filters jstests run by tag regex(es) - no tags in the test must match the regexes.  ' +
                            'Specify single regex string or JSON array.')
+    parser.add_option('--mongod-write-conflict-frequency', dest='mongod_write_conflict_frequency',
+                      default=0.0, type='float', action='store',
+                      help='Controls the WTWriteConflictException failpoint which causes ' +
+                           'WriteConflictExceptions to be thrown with the given probability')
 
     global tests
     (options, tests) = parser.parse_args()
@@ -1428,6 +1446,11 @@ def main():
         tests = filter_tests_by_tag(tests,
             smoke.suites.RegexQuery(include_res=to_regex_array(options.include_tags),
                                     exclude_res=to_regex_array(options.exclude_tags)))
+
+    if options.mongod_write_conflict_frequency < 0.0 or \
+            options.mongod_write_conflict_frequency > 1.0:
+        print "mongod write conflict frequency must be between 0.0 and 1.0"
+        return
 
     if not tests:
         print "warning: no tests specified"

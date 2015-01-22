@@ -604,6 +604,12 @@ MongoRunner.runMongod = function( opts ){
     mongod.savedOptions = MongoRunner.savedOptions[ mongod.runId ];
     mongod.fullOptions = fullOptions;
     
+    if (jsTestOptions().mongod_write_conflict_frequency > 0.0) {
+        var res = mongod.getDB('admin').runCommand(
+            {configureFailPoint:'WTWriteConflictException',
+             mode: {activationProbability: jsTestOptions().mongod_write_conflict_frequency}});
+        assert.commandWorked(res);
+    }
     return mongod
 }
 
@@ -899,6 +905,12 @@ startMongoProgram = function(){
         return false;
     }, "unable to connect to mongo program on port " + port, 600 * 1000 );
 
+    if (args[0] == 'mongod' && jsTestOptions().mongod_write_conflict_frequency > 0.0) {
+        var res = m.getDB('admin').runCommand(
+            {configureFailPoint:'WTWriteConflictException',
+             mode: {activationProbability: jsTestOptions().mongod_write_conflict_frequency}});
+        assert.commandWorked(res);
+    }
     return m;
 }
 
