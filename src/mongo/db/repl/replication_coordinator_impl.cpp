@@ -1936,7 +1936,13 @@ namespace {
                 // Switching into SECONDARY, but not from PRIMARY.
                 _canServeNonLocalReads.store(1U);
             }
-            result = kActionChooseNewSyncSource;
+            else if (newState.primary()) {
+                // Switching into PRIMARY
+                result = kActionStopBGSync;
+            }
+            else {
+                result = kActionChooseNewSyncSource;
+            }
         }
         if (newState.secondary() && _topCoord->getRole() == TopologyCoordinator::Role::candidate) {
             // When transitioning to SECONDARY, the only way for _topCoord to report the candidate
@@ -1962,6 +1968,9 @@ namespace {
         case kActionCloseAllConnections:
             _externalState->closeConnections();
             _externalState->clearShardingState();
+            break;
+        case kActionStopBGSync:
+            _externalState->pauseApplier();
             break;
         case kActionWinElection: {
             boost::unique_lock<boost::mutex> lk(_mutex);

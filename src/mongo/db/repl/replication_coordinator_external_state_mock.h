@@ -65,6 +65,7 @@ namespace repl {
         virtual void killAllUserOperations(OperationContext* txn);
         virtual void clearShardingState();
         virtual void signalApplierToChooseNewSyncSource();
+        virtual void pauseApplier();
         virtual OperationContext* createOperationContext(const std::string& threadName);
         virtual void dropAllTempCollections(OperationContext* txn);
 

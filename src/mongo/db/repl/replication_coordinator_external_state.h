@@ -161,6 +161,11 @@ namespace repl {
         virtual void signalApplierToChooseNewSyncSource() = 0;
 
         /**
+         * Notifies the bgsync thread to stop until we are no longer PRIMARY.
+         */
+        virtual void pauseApplier() = 0;
+
+        /**
          * Returns an OperationContext, owned by the caller, that may be used in methods of
          * the same instance that require an OperationContext.
          */

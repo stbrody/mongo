@@ -283,6 +283,7 @@ namespace repl {
             kActionNone,
             kActionCloseAllConnections,  // Also indicates that we should clear sharding state.
             kActionChooseNewSyncSource,
+            kActionStopBGSync,
             kActionWinElection
         };
 

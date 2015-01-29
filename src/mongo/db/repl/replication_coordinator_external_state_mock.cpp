@@ -144,6 +144,8 @@ namespace repl {
 
     void ReplicationCoordinatorExternalStateMock::signalApplierToChooseNewSyncSource() {}
 
+    void ReplicationCoordinatorExternalStateMock::pauseApplier() {}
+
     OperationContext* ReplicationCoordinatorExternalStateMock::createOperationContext(
             const std::string& threadName) {
         return new OperationContextReplMock;

@@ -244,6 +244,10 @@ namespace {
         BackgroundSync::get()->clearSyncTarget();
     }
 
+    void ReplicationCoordinatorExternalStateImpl::pauseApplier() {
+        BackgroundSync::get()->stop();
+    }
+
     OperationContext* ReplicationCoordinatorExternalStateImpl::createOperationContext(
             const std::string& threadName) {
         Client::initThreadIfNotAlready(threadName.c_str());
