@@ -149,6 +149,7 @@ namespace {
         getReplCoord()->fillIsMasterForReplSet(&imResponse);
         ASSERT_FALSE(imResponse.isMaster()) << imResponse.toBSON().toString();
         ASSERT_TRUE(imResponse.isSecondary()) << imResponse.toBSON().toString();
+        getReplCoord()->signalProducerPaused();
         getReplCoord()->signalDrainComplete(&txn);
         getReplCoord()->fillIsMasterForReplSet(&imResponse);
         ASSERT_TRUE(imResponse.isMaster()) << imResponse.toBSON().toString();

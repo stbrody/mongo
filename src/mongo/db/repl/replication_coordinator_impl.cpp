@@ -157,6 +157,7 @@ namespace {
         _inShutdown(false),
         _memberState(MemberState::RS_STARTUP),
         _isWaitingForDrainToComplete(false),
+        _isWaitingForProducerToPause(false),
         _rsConfigState(kConfigPreStart),
         _selfIndex(-1),
         _sleptLastElection(false),
@@ -499,6 +500,12 @@ namespace {
         return _isWaitingForDrainToComplete;
     }
 
+    void ReplicationCoordinatorImpl::signalProducerPaused() {
+        boost::lock_guard<boost::mutex> lk(_mutex);
+        _isWaitingForProducerToPause = false;
+        _producerPausedCondition.notify_all();
+    }
+
     void ReplicationCoordinatorImpl::signalDrainComplete(OperationContext* txn) {
         // This logic is a little complicated in order to avoid acquiring the global exclusive lock
         // unnecessarily.  This is important because the applier may call signalDrainComplete()
@@ -525,6 +532,9 @@ namespace {
         boost::unique_lock<boost::mutex> lk(_mutex);
         if (!_isWaitingForDrainToComplete) {
             return;
+        }
+        while (_isWaitingForProducerToPause) {
+            _producerPausedCondition.wait(lk);
         }
         lk.unlock();
         ScopedTransaction transaction(txn, MODE_X);
@@ -1924,6 +1934,7 @@ namespace {
                 info->condVar->notify_all();
             }
             _isWaitingForDrainToComplete = false;
+            _isWaitingForProducerToPause = false;
             _canAcceptNonLocalWrites = false;
             result = kActionCloseAllConnections;
         }
@@ -1968,6 +1979,7 @@ namespace {
             _electionId = OID::gen();
             _topCoord->processWinElection(_electionId, getNextGlobalOptime());
             _isWaitingForDrainToComplete = true;
+            _isWaitingForProducerToPause = true;
             const PostMemberStateUpdateAction nextAction =
                 _updateMemberStateFromTopologyCoordinator_inlock();
             invariant(nextAction != kActionWinElection);

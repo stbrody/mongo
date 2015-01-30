@@ -449,6 +449,7 @@ namespace {
         _lastOpTimeFetched = OpTime(0,0);
         _lastFetchedHash = 0;
         _condvar.notify_all();
+        getGlobalReplicationCoordinator()->signalProducerPaused();
     }
 
     void BackgroundSync::start(OperationContext* txn) {
