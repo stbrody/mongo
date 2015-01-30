@@ -216,6 +216,7 @@ namespace {
         replCoord->fillIsMasterForReplSet(&imResponse);
         ASSERT_FALSE(imResponse.isMaster()) << imResponse.toBSON().toString();
         ASSERT_TRUE(imResponse.isSecondary()) << imResponse.toBSON().toString();
+        replCoord->signalProducerPaused();
         replCoord->signalDrainComplete(&txn);
         replCoord->fillIsMasterForReplSet(&imResponse);
         ASSERT_TRUE(imResponse.isMaster()) << imResponse.toBSON().toString();

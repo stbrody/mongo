@@ -163,6 +163,8 @@ namespace repl {
 
     void ReplicationCoordinatorMock::signalDrainComplete(OperationContext*) {}
 
+    void ReplicationCoordinatorMock::signalProducerPaused() {}
+
     void ReplicationCoordinatorMock::signalUpstreamUpdater() {}
 
     bool ReplicationCoordinatorMock::prepareReplSetUpdatePositionCommand(

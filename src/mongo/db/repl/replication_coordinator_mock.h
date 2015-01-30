@@ -113,6 +113,8 @@ namespace repl {
 
         virtual void signalDrainComplete(OperationContext*);
 
+        virtual void signalProducerPaused();
+
         virtual void signalUpstreamUpdater();
 
         virtual bool prepareReplSetUpdatePositionCommand(BSONObjBuilder* cmdBuilder);

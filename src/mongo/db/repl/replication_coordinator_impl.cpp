@@ -157,6 +157,7 @@ namespace {
         _inShutdown(false),
         _memberState(MemberState::RS_STARTUP),
         _isWaitingForDrainToComplete(false),
+        _isWaitingForProducerToPause(false),
         _rsConfigState(kConfigPreStart),
         _selfIndex(-1),
         _sleptLastElection(false),
@@ -499,6 +500,12 @@ namespace {
         return _isWaitingForDrainToComplete;
     }
 
+    void ReplicationCoordinatorImpl::signalProducerPaused() {
+        boost::lock_guard<boost::mutex> lk(_mutex);
+        _isWaitingForProducerToPause = false;
+        _producerPausedCondition.notify_all();
+    }
+
     void ReplicationCoordinatorImpl::signalDrainComplete(OperationContext* txn) {
         // This logic is a little complicated in order to avoid acquiring the global exclusive lock
         // unnecessarily.  This is important because the applier may call signalDrainComplete()
@@ -506,14 +513,15 @@ namespace {
         //
         // The steps are:
         // 1.) Check to see if we're waiting for this signal.  If not, return early.
-        // 2.) Otherwise, release the mutex while acquiring the global exclusive lock,
+        // 2.) Wait for the producer thread to notice that we have become PRIMARY and stop itself.
+        // 3.) Release the mutex while acquiring the global exclusive lock,
         //     since that might take a while (NB there's a deadlock cycle otherwise, too).
-        // 3.) Re-check to see if we've somehow left drain mode.  If we have not, clear
+        // 4.) Re-check to see if we've somehow left drain mode.  If we have not, clear
         //     _isWaitingForDrainToComplete, set the flag allowing non-local database writes and
         //     drop the mutex.  At this point, no writes can occur from other threads, due to the
         //     global exclusive lock.
-        // 4.) Drop all temp collections.
-        // 5.) Drop the global exclusive lock.
+        // 5.) Drop all temp collections.
+        // 6.) Drop the global exclusive lock.
         //
         // Because replicatable writes are forbidden while in drain mode, and we don't exit drain
         // mode until we have the global exclusive lock, which forbids all other threads from making
@@ -525,6 +533,9 @@ namespace {
         boost::unique_lock<boost::mutex> lk(_mutex);
         if (!_isWaitingForDrainToComplete) {
             return;
+        }
+        while (_isWaitingForProducerToPause) {
+            _producerPausedCondition.wait(lk);
         }
         lk.unlock();
         ScopedTransaction transaction(txn, MODE_X);
@@ -1924,6 +1935,8 @@ namespace {
                 info->condVar->notify_all();
             }
             _isWaitingForDrainToComplete = false;
+            _isWaitingForProducerToPause = false;
+            _producerPausedCondition.notify_all();
             _canAcceptNonLocalWrites = false;
             result = kActionCloseAllConnections;
         }
@@ -1968,6 +1981,7 @@ namespace {
             _electionId = OID::gen();
             _topCoord->processWinElection(_electionId, getNextGlobalOptime());
             _isWaitingForDrainToComplete = true;
+            _isWaitingForProducerToPause = true;
             const PostMemberStateUpdateAction nextAction =
                 _updateMemberStateFromTopologyCoordinator_inlock();
             invariant(nextAction != kActionWinElection);

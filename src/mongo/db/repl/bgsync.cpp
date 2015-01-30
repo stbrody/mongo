@@ -133,13 +133,16 @@ namespace {
     }
 
     void BackgroundSync::notify(OperationContext* txn) {
-        boost::lock_guard<boost::mutex> lock(_mutex);
+        boost::unique_lock<boost::mutex> lock(_mutex);
 
         // If all ops in the buffer have been applied, unblock waitForRepl (if it's waiting)
         if (_buffer.empty()) {
             _appliedBuffer = true;
-            _replCoord->signalDrainComplete(txn);
             _condvar.notify_all();
+            lock.unlock();
+            // Must not hold _mutex while calling signalDrainComplete as it might block for bgsync
+            // to call stop(), which it will need _mutex to do.
+            _replCoord->signalDrainComplete(txn);
         }
     }
 
@@ -449,6 +452,7 @@ namespace {
         _lastOpTimeFetched = OpTime(0,0);
         _lastFetchedHash = 0;
         _condvar.notify_all();
+        getGlobalReplicationCoordinator()->signalProducerPaused();
     }
 
     void BackgroundSync::start(OperationContext* txn) {
