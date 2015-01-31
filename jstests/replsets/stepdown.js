@@ -7,7 +7,9 @@ load("jstests/replsets/rslib.js")
 
 var replTest = new ReplSetTest({ name: 'testSet', nodes: 2, nodeOptions: {verbose: 1} });
 var nodes = replTest.startSet();
-replTest.initiate();
+var nodeStrings= replTest.nodeList();
+replTest.initiate({_id:'testSet', members: [{'_id':0, host: nodeStrings[0], priority: 10},
+                                            {'_id':1, host:nodeStrings[1]}]});
 var master = replTest.getMaster();
 
 // do a write

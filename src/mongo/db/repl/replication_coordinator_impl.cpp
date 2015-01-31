@@ -504,6 +504,7 @@ namespace {
         boost::lock_guard<boost::mutex> lk(_mutex);
         _isWaitingForProducerToPause = false;
         _producerPausedCondition.notify_all();
+        log() << "PRODUCER HAS PAUSED!!!!!!";
     }
 
     void ReplicationCoordinatorImpl::signalDrainComplete(OperationContext* txn) {
@@ -535,6 +536,7 @@ namespace {
             return;
         }
         while (_isWaitingForProducerToPause) {
+            log() << "WAITING FOR PRODUCER TO PAUSE!!!!!!!!!!";
             _producerPausedCondition.wait(lk);
         }
         lk.unlock();

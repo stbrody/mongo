@@ -140,6 +140,7 @@ namespace {
             _appliedBuffer = true;
             _condvar.notify_all();
             lock.unlock();
+            log() << "APPLIER FINISHED APPLYING ITS BUFFER, SIGNALING DRAIN HAS COMPLETED!!!!";
             // Must not hold _mutex while calling signalDrainComplete as it might block for bgsync
             // to call stop(), which it will need _mutex to do.
             _replCoord->signalDrainComplete(txn);
@@ -217,6 +218,7 @@ namespace {
 
             // Wait until we've applied the ops we have before we choose a sync target
             while (!_appliedBuffer && !inShutdownStrict()) {
+                log() << "PRODUCER WAITING UNTIL APPLIER HAS APPLIED THE BUFFER!!!!!";
                 _condvar.wait(lock);
             }
             if (inShutdownStrict()) {
@@ -452,6 +454,7 @@ namespace {
         _lastOpTimeFetched = OpTime(0,0);
         _lastFetchedHash = 0;
         _condvar.notify_all();
+        log() << "STOPPING BACKGROUNDSYNC!!!!!";
         getGlobalReplicationCoordinator()->signalProducerPaused();
     }
 

@@ -528,6 +528,7 @@ namespace {
         if (!peek_success) {
             // if we don't have anything in the queue, wait a bit for something to appear
             if (ops->empty()) {
+                log() << "APPLIER DIDN'T HAVE ANYTHING IN THE QUEUE, SIGNALING DRAIN COMPLETE!!!!!";
                 replCoord->signalDrainComplete(txn);
                 // block up to 1 second
                 _networkQueue->waitForMore();
