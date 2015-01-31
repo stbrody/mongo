@@ -157,6 +157,8 @@ namespace repl {
 
         virtual void signalProducerPaused();
 
+        virtual void signalProducerRunning();
+
         virtual void signalUpstreamUpdater();
 
         virtual bool prepareReplSetUpdatePositionCommand(BSONObjBuilder* cmdBuilder);
@@ -822,8 +824,8 @@ namespace repl {
         // True if we are waiting for the applier to finish draining.
         bool _isWaitingForDrainToComplete;                                                // (M)
 
-        // True if we are waiting for the BackgroundSync thread to stop fetching new ops
-        bool _isWaitingForProducerToPause;                                                // (M)
+        // True if the BackgroundSync thread is currently fetching new ops.
+        bool _isProducerRunning;                                                          // (M)
 
         // Used to block for the BackgroundSync thread to stop fetching new ops
         boost::condition_variable _producerPausedCondition;                               // (M)

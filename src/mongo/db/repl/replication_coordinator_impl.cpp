@@ -157,7 +157,7 @@ namespace {
         _inShutdown(false),
         _memberState(MemberState::RS_STARTUP),
         _isWaitingForDrainToComplete(false),
-        _isWaitingForProducerToPause(false),
+        _isProducerRunning(false),
         _rsConfigState(kConfigPreStart),
         _selfIndex(-1),
         _sleptLastElection(false),
@@ -502,9 +502,15 @@ namespace {
 
     void ReplicationCoordinatorImpl::signalProducerPaused() {
         boost::lock_guard<boost::mutex> lk(_mutex);
-        _isWaitingForProducerToPause = false;
+        _isProducerRunning = false;
         _producerPausedCondition.notify_all();
         log() << "PRODUCER HAS PAUSED!!!!!!";
+    }
+
+    void ReplicationCoordinatorImpl::signalProducerRunning() {
+        boost::lock_guard<boost::mutex> lk(_mutex);
+        _isProducerRunning = true;
+        log() << "PRODUCER HAS STARTED!!!!!!";
     }
 
     void ReplicationCoordinatorImpl::signalDrainComplete(OperationContext* txn) {
@@ -535,7 +541,7 @@ namespace {
         if (!_isWaitingForDrainToComplete) {
             return;
         }
-        while (_isWaitingForProducerToPause) {
+        while (_isProducerRunning) {
             log() << "WAITING FOR PRODUCER TO PAUSE!!!!!!!!!!";
             _producerPausedCondition.wait(lk);
         }
@@ -1937,8 +1943,6 @@ namespace {
                 info->condVar->notify_all();
             }
             _isWaitingForDrainToComplete = false;
-            _isWaitingForProducerToPause = false;
-            _producerPausedCondition.notify_all();
             _canAcceptNonLocalWrites = false;
             result = kActionCloseAllConnections;
         }
@@ -1983,7 +1987,6 @@ namespace {
             _electionId = OID::gen();
             _topCoord->processWinElection(_electionId, getNextGlobalOptime());
             _isWaitingForDrainToComplete = true;
-            _isWaitingForProducerToPause = true;
             const PostMemberStateUpdateAction nextAction =
                 _updateMemberStateFromTopologyCoordinator_inlock();
             invariant(nextAction != kActionWinElection);

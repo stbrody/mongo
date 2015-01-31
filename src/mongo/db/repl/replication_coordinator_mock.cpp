@@ -165,6 +165,8 @@ namespace repl {
 
     void ReplicationCoordinatorMock::signalProducerPaused() {}
 
+    void ReplicationCoordinatorMock::signalProducerRunning() {}
+
     void ReplicationCoordinatorMock::signalUpstreamUpdater() {}
 
     bool ReplicationCoordinatorMock::prepareReplSetUpdatePositionCommand(

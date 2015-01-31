@@ -470,6 +470,8 @@ namespace {
         _lastOpTimeFetched = _replCoord->getMyLastOptime();
         _lastFetchedHash = _lastAppliedHash;
 
+        getGlobalReplicationCoordinator()->signalProducerRunning();
+
         LOG(1) << "replset bgsync fetch queue set to: " << _lastOpTimeFetched << 
             " " << _lastFetchedHash;
     }

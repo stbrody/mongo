@@ -324,10 +324,16 @@ namespace repl {
         virtual void signalDrainComplete(OperationContext* txn) = 0;
 
         /**
-         * Signals that the BackgroundSync thread has stopped fetching new ops to apply, after a
-         * successful election triggers the draining of the applier buffer.
+         * Informs the ReplicationCoordinator that the BackgroundSync thread has stopped fetching
+         * new ops to apply, most likely after a successful election to PRIMARY triggers the
+         * draining of the applier buffer.
          */
         virtual void signalProducerPaused() = 0;
+
+        /**
+         * Informs the ReplicationCoordinator that the BackgroundSync thread has started running.
+         */
+        virtual void signalProducerRunning() = 0;
 
         /**
          * Signals the sync source feedback thread to wake up and send a handshake and
