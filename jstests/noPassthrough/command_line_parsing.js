@@ -1,24 +1,23 @@
 // validate command line parameter parsing
 
-port = allocatePorts( 1 )[ 0 ];
 var baseName = "jstests_slowNightly_command_line_parsing";
 
 // test notablescan
-var m = startMongod( "--port", port, "--dbpath", MongoRunner.dataPath + baseName, "--notablescan" );
+var m = MongoRunner.runMongod({notablescan: ""});
 m.getDB( baseName ).getCollection( baseName ).save( {a:1} );
 assert.throws( function() { m.getDB( baseName ).getCollection( baseName ).find( {a:1} ).toArray() } );
 
 // test config file 
-var m2 = startMongod( "--port", port+2, "--dbpath", MongoRunner.dataPath + baseName +"2", "--config", "jstests/libs/testconfig");
+var m2 = MongoRunner.runMongod({config: "jstests/libs/testconfig"});
 
 var m2expected = {
     "parsed" : {
         "config" : "jstests/libs/testconfig",
         "storage" : {
-            "dbPath" : MongoRunner.dataDir + "/jstests_slowNightly_command_line_parsing2",
+            "dbPath" : m2.dbpath
         },
         "net" : {
-            "port" : 31002
+            "port" : m2.port
         },
         "help" : false,
         "version" : false,
@@ -34,17 +33,16 @@ delete m2result.parsed.storage.wiredTiger
 assert.docEq( m2expected.parsed, m2result.parsed );
 
 // test JSON config file
-var m3 = startMongod("--port", port+4, "--dbpath", MongoRunner.dataPath + baseName +"4",
-                     "--config", "jstests/libs/testconfig");
+var m3 = MongoRunner.runMongod({config: "jstests/libs/testconfig"});
 
 var m3expected = {
     "parsed" : {
         "config" : "jstests/libs/testconfig",
         "storage" : {
-            "dbPath" : MongoRunner.dataDir + "/jstests_slowNightly_command_line_parsing4",
+            "dbPath" : m3.dbpath
         },
         "net" : {
-            "port" : 31004
+            "port" : m3.port
         },
         "help" : false,
         "version" : false,

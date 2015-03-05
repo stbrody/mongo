@@ -10,13 +10,13 @@ resetDbpath(dbpath);
 mkdir(external_scratch_dir);
 
 // Password is correct
-md = startMongod("--nopreallocj",
-                 "--port", port, 
-                 "--dbpath", dbpath, 
-                 "--sslMode","requireSSL",
-                 "--sslPEMKeyFile", "jstests/libs/password_protected.pem",
-                 "--sslPEMKeyPassword", "qwerty");
-// startMongod connects a Mongo shell, so if we get here, the test is successful.
+var md = MongoRunner.runMongod({nopreallocj: "",
+                                port: port,
+                                dbpath: dbpath,
+                                sslMode: "requireSSL",
+                                sslPEMKeyFile: "jstests/libs/password_protected.pem",
+                                sslPemKeyPassword: "qwerty"});
+// MongoRunner.runMongod connects a Mongo shell, so if we get here, the test is successful.
 
 
 // Password incorrect; error logged is:
