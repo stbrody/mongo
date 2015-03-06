@@ -747,7 +747,7 @@ startMongodEmpty = function () {
 
     return startMongoProgram.apply(null, args);
 }
-startMongod = function () {
+_startMongod = function () {
     print("startMongod WARNING DELETES DATA DIRECTORY THIS IS FOR TESTING ONLY");
     return startMongodEmpty.apply(null, arguments);
 }

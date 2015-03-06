@@ -47,7 +47,7 @@ MongodRunner.prototype.start = function( reuseData ) {
     if ( reuseData ) {
         return startMongoProgram.apply( null, args );
     } else {
-        return startMongod.apply( null, args );
+        return _startMongod.apply( null, args );
     }
 }
 
@@ -217,7 +217,7 @@ ReplTest.prototype.start = function( master , options , restart, norepl ){
         }
         return conn;
     } else {
-        var conn = startMongod.apply(null, o);
+        var conn = _startMongod.apply(null, o);
         if (jsTestOptions().keyFile || jsTestOptions().auth || jsTestOptions().useX509) {
             jsTest.authenticate(conn);
         }
