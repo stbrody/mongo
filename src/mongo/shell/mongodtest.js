@@ -4,9 +4,9 @@
 startMongodTest = function (port, dirname, restart, extraOptions) {
     if (!port)
         port = MongoRunner.nextOpenPort();
-    var f = startMongodEmpty;
+    var f = _startMongodEmpty;
     if (restart)
-        f = startMongodNoReset;
+        f = _startMongodNoReset;
     if (!dirname)
         dirname = "" + port; // e.g., data/db/27000
 
