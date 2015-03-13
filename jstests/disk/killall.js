@@ -28,7 +28,7 @@ sleep( 1000 );
  * will not exit cleanly.  We're checking in this assert that mongod will stop quickly even while
  * evaling an infinite loop in server side js.
  */
-var exitCode = Mongorunner.stopMongod(mongod);
+var exitCode = MongoRunner.stopMongod(mongod);
 assert.eq(0, exitCode, "got unexpected exitCode");
 
 // Waits for shell to complete

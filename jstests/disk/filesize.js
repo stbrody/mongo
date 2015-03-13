@@ -14,7 +14,7 @@ if (db.serverBuildInfo().bits == 32) {
     // Restart mongod without --smallFiles
     MongoRunner.stopMongod(m);
     m = MongoRunner.runMongod({
-        restart: true, cleanData: false, dbpath: m.dbpath, bind_ip: "127.0.0.1", nojournal: true});
+        restart: true, cleanData: false, dbpath: m.dbpath, bind_ip: "127.0.0.1", nojournal: ""});
 
     db = m.getDB( baseName );
     var log = db.adminCommand( { getLog : "global" } ).log

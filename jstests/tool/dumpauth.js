@@ -20,7 +20,7 @@ x = runMongoProgram( "mongodump",
                      "--authenticationDatabase=admin",
                      "-u", "testuser",
                      "-p", "testuser",
-                     "-h", "127.0.0.1:"+port,
+                     "-h", "127.0.0.1:"+m.port,
                      "--collection", "testcol" );
 assert.eq(x, 0, "mongodump should succeed with authentication");
 
@@ -30,7 +30,7 @@ x = runMongoProgram( "mongodump",
                      "--authenticationDatabase=admin",
                      "-u", "testuser",
                      "-p", "testuser",
-                     "-h", "127.0.0.1:"+port,
+                     "-h", "127.0.0.1:"+m.port,
                      "--collection", "testcol",
                      "--out", "-" );
 assert.eq(x, 0, "mongodump should succeed with authentication while using '--out'");

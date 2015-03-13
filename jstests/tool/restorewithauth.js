@@ -111,4 +111,4 @@ assert.eq(foo.bar.count(), 4);
 assert.eq(foo.baz.count(), 4);
 assert.eq(foo.bar.getIndexes().length + foo.baz.getIndexes().length, 3); // _id on foo, _id on bar, x on foo
 
-stopMongod(conn);
+MongoRunner.stopMongod(conn);

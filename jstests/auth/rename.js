@@ -1,10 +1,10 @@
 // test renameCollection with auth
 
-m = MongoRunner.runMongod({auth: ""});
+var m = MongoRunner.runMongod({auth: ""});
 
-db1 = m.getDB( baseName )
-db2 = m.getDB( baseName + '_other' )
-admin = m.getDB( 'admin' )
+var db1 = m.getDB("foo");
+var db2 = m.getDB("bar");
+var admin = m.getDB( 'admin' );
 
 // Setup initial data
 admin.createUser({user:'admin', pwd: 'password', roles: jsTest.adminUserRoles});
