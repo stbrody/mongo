@@ -253,7 +253,7 @@ SyncCCTest = function( testName , extraMongodOptions ){
     this._connections = [];
     
     for ( var i=0; i<3; i++ ){
-        this._connections.push( startMongodTest( 30000 + i , testName + i , false, extraMongodOptions ) );
+        this._connections.push(MongoRunner.runMongod(extraMongodOptions));
     }
     
     this.url = this._connections.map( function(z){ return z.name; } ).join( "," );
@@ -282,12 +282,14 @@ SyncCCTest.prototype.checkHashes = function( dbname , msg ){
 
 SyncCCTest.prototype.tempKill = function( num ){
     num = num || 0;
-    stopMongod( 30000 + num );
+    MongoRunner.stopMongod(this._connections[num]);
 }
 
 SyncCCTest.prototype.tempStart = function( num ){
     num = num || 0;
-    this._connections[num] = startMongodTest( 30000 + num , this._testName + num , true );
+    var old = this._connections[num];
+    this._connections[num] = MongoRunner.runMongod({
+            restart: true, cleanData: false, port: old.port, dbpath: old.dbpath});
 }
 
 
