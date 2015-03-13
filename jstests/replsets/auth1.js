@@ -12,7 +12,7 @@ var m = MongoRunner.runMongod({auth : "", port : port[4], dbpath : MongoRunner.d
 
 assert.eq(m.getDB("local").auth("__system", ""), 0);
 
-stopMongod(port[4]);
+MongoRunner.stopMongod(m);
 
 
 print("reset permissions");
@@ -35,11 +35,11 @@ run("chmod", "600", path+"key2");
 
 
 print("add a user to server0: foo");
-m = startMongodTest( port[0], name+"-0", 0 );
+m = MongoRunner.runMongod({});
 m.getDB("admin").createUser({user: "foo", pwd: "bar", roles: jsTest.adminUserRoles});
 m.getDB("test").createUser({user: "bar", pwd: "baz", roles: jsTest.basicUserRoles});
 print("make sure user is written before shutting down");
-stopMongod(port[0]);
+MongoRunner.stopMongod(m);
 
 print("start up rs");
 var rs = new ReplSetTest({"name" : name, "nodes" : 3, "startPort" : port[0]});
