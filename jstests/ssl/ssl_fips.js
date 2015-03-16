@@ -17,5 +17,5 @@ if (mongo != 0) {
 }
 else {
     // kill mongod
-    stopMongod(md);
+    MongoRunner.stopMongod(md);
 }

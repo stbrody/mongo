@@ -19,7 +19,7 @@ function testSSLTransition(oldMode, newMode, shouldSucceed) {
                                    "sslMode" : newMode });
 
     assert(res["ok"] == shouldSucceed, tojson(res));
-    stopMongod(port);
+    MongoRunner.stopMongod(port);
 }
 
 function testAuthModeTransition(oldMode, newMode, sslMode, shouldSucceed) {
@@ -36,7 +36,7 @@ function testAuthModeTransition(oldMode, newMode, sslMode, shouldSucceed) {
                                    "clusterAuthMode" : newMode });
 
     assert(res["ok"] == shouldSucceed, tojson(res));
-    stopMongod(port);
+    MongoRunner.stopMongod(port);
 }
 
 testSSLTransition("allowSSL", "invalid", false);

@@ -180,7 +180,7 @@ for (var i = 0; i < 5; ++i) {
     
     // kill the process hard
     log("hard kill");
-    stopMongod(conn, /*signal*/9);
+    MongoRunner.stopMongod(conn, /*signal*/9);
     
     sleep(5000);
 }

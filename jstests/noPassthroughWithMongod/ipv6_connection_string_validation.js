@@ -27,7 +27,7 @@ if ("undefined" == typeof inner_mode) {
 
     // Stop the server we started
     jsTest.log("Outer mode test stopping server");
-    stopMongod(port, 15);
+    MongoRunner.stopMongod(port, 15);
 
     // Pass the inner test's exit code back as the outer test's exit code
     quit(exitCode);

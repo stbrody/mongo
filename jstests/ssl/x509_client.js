@@ -57,7 +57,7 @@ var mongo = MongoRunner.runMongod({port : port,
                                 auth:""});
 
 authAndTest(mongo);
-stopMongod(port);
+MongoRunner.stopMongod(port);
 
 print("2. Testing x.509 auth to mongos");
 var x509_options = {sslMode : "requireSSL",

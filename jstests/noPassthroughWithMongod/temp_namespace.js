@@ -31,4 +31,4 @@ conn = MongoRunner.runMongod({restart:true,
 d = conn.getDB('test')
 assert.eq(countCollectionNames( d, /temp\d$/) , 0)
 assert.eq(countCollectionNames( d, /keep\d$/) , 4)
-stopMongod(conn);
+MongoRunner.stopMongod(conn);

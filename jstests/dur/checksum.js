@@ -16,7 +16,7 @@ if (0) {
     db.foo.insert({a: 2});
     db.runCommand({getlasterror:1, j:1})
 
-    stopMongod(conn.port, /*signal*/9);
+    MongoRunner.stopMongod(conn.port, /*signal*/9);
 
     jsTest.log("Journal file left at " + path + "/journal/j._0");
     quit();
