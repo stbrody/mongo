@@ -677,7 +677,7 @@ MongoRunner.stopMongod = function( port, signal, opts ){
         if( opts ) port = parseInt( opts.port )
     }
     
-    var exitCode = stopMongod( parseInt( port ), parseInt( signal ), opts )
+    var exitCode = _stopMongoProgram( parseInt( port ), parseInt( signal ), opts )
     
     delete MongoRunner.usedPortMap[ "" + parseInt( port ) ]
 

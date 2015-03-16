@@ -33,7 +33,7 @@ ToolTest.prototype.startDB = function( coll ){
 ToolTest.prototype.stop = function(){
     if ( ! this.m )
         return;
-    stopMongod( this.port );
+    _stopMongoProgram( this.port );
     this.m = null;
     this.db = null;
 
@@ -179,7 +179,7 @@ ReplTest.prototype.stop = function( master , signal ){
     }
 
     print('*** ' + this.name + " completed successfully ***");
-    return stopMongod( this.getPort( master ) , signal || 15 );
+    return _stopMongoProgram( this.getPort( master ) , signal || 15 );
 }
 
 allocatePorts = function( n , startPort ) {
@@ -205,7 +205,7 @@ SyncCCTest = function( testName , extraMongodOptions ){
 
 SyncCCTest.prototype.stop = function(){
     for ( var i=0; i<this._connections.length; i++){
-        stopMongod( 30000 + i );
+        _stopMongoProgram( 30000 + i );
     }
 
     print('*** ' + this._testName + " completed successfully ***");

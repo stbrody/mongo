@@ -1157,7 +1157,6 @@ help = shellHelper.help = function (x) {
     else if (x == "test") {
         print("\tMongoRunner.runMongod(args)   DELETES DATA DIR and then starts mongod");
         print("\t                              returns a connection to the new server");
-        print("\tstopMongoProgram(port[, signal])");
         return;
     }
     else if (x == "") {
