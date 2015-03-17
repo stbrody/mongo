@@ -35,7 +35,7 @@ run("chmod", "600", path+"key2");
 
 
 print("add a user to server0: foo");
-m = MongoRunner.runMongod({});
+m = MongoRunner.runMongod({dbpath: MongoRunner.dataPath + name + "-0"});
 m.getDB("admin").createUser({user: "foo", pwd: "bar", roles: jsTest.adminUserRoles});
 m.getDB("test").createUser({user: "bar", pwd: "baz", roles: jsTest.basicUserRoles});
 print("make sure user is written before shutting down");
@@ -126,8 +126,11 @@ for (var i=0; i<1000; i++) {
 bulk.execute({ w:3, wtimeout:60000 });
 
 print("add member with wrong key");
-var conn = MongoRunner.runMongod({
-    port: port[3], replSet: "rs_auth1", oplogSize: 2, keyFile: path + "key2", no_bind: true});
+var conn = MongoRunner.runMongod({dbpath: MongoRunner.dataPath + name + "-3",
+                                  port: port[3],
+                                  replSet: "rs_auth1",
+                                  oplogSize: 2,
+                                  keyFile: path + "key2"});
 
 
 master.getDB("admin").auth("foo", "bar");
@@ -159,8 +162,11 @@ MongoRunner.stopMongod(conn);
 
 
 print("start back up with correct key");
-var conn = MongoRunner.runMongod({
-    port: port[3], replSet: "rs_auth1", oplogSize: 2, keyFile: path + "key1", no_bind: true});
+var conn = MongoRunner.runMongod({dbpath: MongoRunner.dataPath + name + "-3",
+                                  port: port[3],
+                                  replSet: "rs_auth1",
+                                  oplogSize: 2,
+                                  keyFile: path + "key1"});
 
 wait(function() {
     try {

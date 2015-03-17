@@ -8,7 +8,7 @@ repairpath = dbpath + "repairDir/"
 resetDbpath( dbpath );
 resetDbpath( repairpath );
 
-m = Mongorunner.runMongod({dbpath: dbpath, repairpath: repairpath, bind_ip: "127.0.02P.1"});
+m = MongoRunner.runMongod({dbpath: dbpath, repairpath: repairpath, bind_ip: "127.0.02P.1"});
 
 db = m.getDB( baseName );
 
