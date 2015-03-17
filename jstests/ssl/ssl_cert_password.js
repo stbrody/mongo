@@ -15,7 +15,7 @@ var md = MongoRunner.runMongod({nopreallocj: "",
                                 dbpath: dbpath,
                                 sslMode: "requireSSL",
                                 sslPEMKeyFile: "jstests/libs/password_protected.pem",
-                                sslPemKeyPassword: "qwerty"});
+                                sslPEMKeyPassword: "qwerty"});
 // MongoRunner.runMongod connects a Mongo shell, so if we get here, the test is successful.
 
 

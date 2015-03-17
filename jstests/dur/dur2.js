@@ -85,7 +85,7 @@ assert(listFiles(path + "/journal/").length > 0, "journal directory is unexpecta
 // restart and recover
 log("restart mongod and recover");
 conn = MongoRunner.runMongod({restart: true,
-                              cleanData: true,
+                              cleanData: false,
                               dbpath: path,
                               dur: "",
                               smallfiles: "",

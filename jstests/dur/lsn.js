@@ -109,7 +109,14 @@ MongoRunner.stopMongod(conn, /*signal*/9);
 
 // restart and recover
 log("restart mongod, recover, verify");
-conn = MongoRunner.runMongod({dbpath: path2, dur: "", smallfiles: "", durOptions: 24, master: "", oplogSize: 64});
+conn = MongoRunner.runMongod({restart:true,
+                              cleanData: false,
+                              dbpath: path2,
+                              dur: "",
+                              smallfiles: "",
+                              durOptions: 24,
+                              master: "",
+                              oplogSize: 64});
 verify();
 
 // idea here is to verify (in a simplistic way) that we are in a good state to do further ops after recovery

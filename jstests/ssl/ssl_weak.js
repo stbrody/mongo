@@ -30,7 +30,7 @@ var md2 = MongoRunner.runMongod({sslMode: "requireSSL",
                                 sslPEMKeyFile: "jstests/libs/server.pem",
                                 sslCAFile: "jstests/libs/ca.pem"});
 
-mongo = runMongoProgram("mongo", "--port", ports[1], "--ssl", "--sslAllowInvalidCertificates",
+mongo = runMongoProgram("mongo", "--port", md2.port, "--ssl", "--sslAllowInvalidCertificates",
                         "--eval", ";");
 
 // 1 is the exit code for failure

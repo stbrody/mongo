@@ -12,8 +12,14 @@ function f(variant, quickCommits, paranoid) {
         N = 300;
 
     // use replication to exercise that code too with a close, and also to test local.sources with a close
-    var conn = MongoRunner.runMongod({dur: "", durOptions: options, master: "", oplogSize: 64});
-    var connSlave = MongoRunner.runMongod({dur: "", durOptions: options, slave: "", source: "localhost:" + conn.port});
+    var conn = MongoRunner.runMongod({dur: "",
+                                      durOptions: options + "",
+                                      master: "",
+                                      oplogSize: 64});
+    var connSlave = MongoRunner.runMongod({dur: "",
+                                           durOptions: options + "",
+                                           slave: "",
+                                           source: "localhost:" + conn.port});
 
     var slave = connSlave.getDB(ourdb);
 

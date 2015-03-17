@@ -11,7 +11,7 @@ var md = MongoRunner.runMongod({sslMode: "requireSSL",
                                 sslCRLFile: "jstests/libs/crl.pem"});
 
 
-var mongo = runMongoProgram("mongo", "--port", port1, "--ssl", "--sslAllowInvalidCertificates",
+var mongo = runMongoProgram("mongo", "--port", md.port, "--ssl", "--sslAllowInvalidCertificates",
                             "--sslPEMKeyFile", "jstests/libs/client.pem",
                             "--eval", ";");
 
@@ -26,7 +26,7 @@ md = MongoRunner.runMongod({sslMode: "requireSSL",
                             sslCRLFile: "jstests/libs/crl_expired.pem"});
 
 
-mongo = runMongoProgram("mongo", "--port", port2, "--ssl", "--sslAllowInvalidCertificates",
+mongo = runMongoProgram("mongo", "--port", md.port, "--ssl", "--sslAllowInvalidCertificates",
                         "--sslPEMKeyFile", "jstests/libs/client.pem",
                         "--eval", ";");
 

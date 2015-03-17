@@ -7,7 +7,7 @@ var md = MongoRunner.runMongod({sslMode: "requireSSL",
                                 sslCAFile: "jstests/libs/ca.pem",
                                 sslCRLFile: "jstests/libs/crl_client_revoked.pem"});
 
-var mongo = runMongoProgram("mongo", "--port", port, "--ssl", "--sslAllowInvalidCertificates",
+var mongo = runMongoProgram("mongo", "--port", md.port, "--ssl", "--sslAllowInvalidCertificates",
                             "--sslPEMKeyFile", "jstests/libs/client_revoked.pem",
                             "--eval", ";");
 
