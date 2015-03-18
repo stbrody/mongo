@@ -428,12 +428,6 @@ MongoRunner.mongoOptions = function( opts ){
         if (!opts.sslMode) opts.sslMode = "requireSSL";
         if (!opts.sslPEMKeyFile) opts.sslPEMKeyFile = "jstests/libs/server.pem";
         if (!opts.sslCAFile) opts.sslCAFile = "jstests/libs/ca.pem";
-
-        // Needed for jstest/ssl/upgrade_to_ssl.js
-        opts.sslWeakCertificateValidation = "";
-
-        // Needed for jstest/ssl/ssl_hostname_validation.js
-        opts.sslAllowInvalidHostnames = "";
     }
 
     if ( jsTestOptions().useX509 && !opts.clusterAuthMode ) {
