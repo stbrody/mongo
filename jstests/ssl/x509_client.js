@@ -4,7 +4,11 @@
 TestData.useX509 = false;
 
 // Check if this build supports the authenticationMechanisms startup parameter.
-var conn = MongoRunner.runMongod({ smallfiles: "", auth: "" });
+var conn = MongoRunner.runMongod({smallfiles: "",
+                                  auth: "",
+                                  sslMode: "requireSSL",
+                                  sslPEMKeyFile: "jstests/libs/server.pem",
+                                  sslCAFile: "jstests/libs/ca.pem"});
 conn.getDB('admin').createUser({user: "root", pwd: "pass", roles: ["root"]});
 conn.getDB('admin').auth("root", "pass");
 var cmdOut = conn.getDB('admin').runCommand({getParameter: 1, authenticationMechanisms: 1})

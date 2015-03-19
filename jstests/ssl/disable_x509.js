@@ -3,7 +3,11 @@
 TestData.useX509 = false;
 var CLIENT_USER = "CN=client,OU=KernelUser,O=MongoDB,L=New York City,ST=New York,C=US"
 
-var conn = MongoRunner.runMongod({ smallfiles: "", auth: "" });
+var conn = MongoRunner.runMongod({smallfiles: "",
+                                  auth: "",
+                                  sslMode: "requireSSL",
+                                  sslPEMKeyFile: "jstests/libs/server.pem",
+                                  sslCAFile: "jstests/libs/ca.pem"});
 
 // Find out if this build supports the authenticationMechanisms startup parameter.
 // If it does, restart with and without the MONGODB-X509 mechanisms enabled.

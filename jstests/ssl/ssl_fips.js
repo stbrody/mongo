@@ -2,6 +2,7 @@
 
 var md = MongoRunner.runMongod({sslMode: "requireSSL",
                                 sslPEMKeyFile: "jstests/libs/server.pem",
+                                sslCAFile: "jstests/libs/ca.pem",
                                 sslFIPSMode: ""});
 
 var mongo = runMongoProgram("mongo", "--port", md.port, "--ssl", "--sslAllowInvalidCertificates",

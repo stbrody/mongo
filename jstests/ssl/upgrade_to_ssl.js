@@ -16,7 +16,8 @@ load("jstests/ssl/libs/ssl_helpers.js");
 var opts = {sslMode:"allowSSL",
             sslPEMKeyFile: SERVER_CERT,
             sslAllowInvalidCertificates: "",
-            sslWeakCertificateValidation: ""};
+            sslWeakCertificateValidation: "",
+            sslCAFile: "jstests/libs/ca.pem"};
 var rst = new ReplSetTest({ name: 'sslSet', nodes: 3, nodeOptions : opts });
 rst.startSet();
 rst.initiate();
