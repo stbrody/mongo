@@ -423,11 +423,7 @@ MongoRunner.mongoOptions = function( opts ){
     // Default for waitForConnect is true
     opts.waitForConnect = (waitForConnect == undefined || waitForConnect == null) ?
         true : waitForConnect;
-    
-    if ( jsTestOptions().useX509 && !opts.clusterAuthMode ) {
-        opts.clusterAuthMode = "x509";
-    }
-    
+
     opts.port = opts.port || MongoRunner.nextOpenPort()
     MongoRunner.usedPortMap[ "" + parseInt( opts.port ) ] = true
     
@@ -479,10 +475,6 @@ MongoRunner.mongodOptions = function( opts ){
 
     if( jsTestOptions().keyFile && !opts.keyFile) {
         opts.keyFile = jsTestOptions().keyFile
-    }
-
-    if ( jsTestOptions().useX509 && !opts.clusterAuthMode ) {
-        opts.clusterAuthMode = "x509";
     }
 
     if( opts.noReplSet ) opts.replSet = null

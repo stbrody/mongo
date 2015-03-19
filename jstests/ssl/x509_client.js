@@ -1,8 +1,3 @@
-// If we are running in use-x509 passthrough mode, turn it off or else the auth 
-// part of this test will not work correctly
-
-TestData.useX509 = false;
-
 // Check if this build supports the authenticationMechanisms startup parameter.
 var conn = MongoRunner.runMongod({smallfiles: "",
                                   auth: "",
@@ -54,19 +49,17 @@ function authAndTest(mongo) {
 }
 
 print("1. Testing x.509 auth to mongod");
-var mongo = MongoRunner.runMongod({port : port,
-                                sslMode : "requireSSL", 
-                                sslPEMKeyFile : SERVER_CERT, 
-                                sslCAFile : CA_CERT,
-                                auth:""});
+var x509_options = {sslMode : "requireSSL",
+                    sslPEMKeyFile : SERVER_CERT,
+                    sslCAFile : CA_CERT,
+                    clusterAuthMode: "x509"};
+
+var mongo = MongoRunner.runMongod(Object.merge(x509_options, {port: port, auth: ""}));
 
 authAndTest(mongo);
 MongoRunner.stopMongod(port);
 
 print("2. Testing x.509 auth to mongos");
-var x509_options = {sslMode : "requireSSL",
-                    sslPEMKeyFile : SERVER_CERT,
-                    sslCAFile : CA_CERT};
 
 var st = new ShardingTest({ shards : 1,
                             mongos : 1,

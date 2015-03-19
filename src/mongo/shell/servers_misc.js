@@ -106,11 +106,6 @@ ReplTest.prototype.getOptions = function( master , extra , putBinaryFirst, norep
         a.push( jsTestOptions().keyFile )
     }
 
-    if( jsTestOptions().useX509 && !a.contains("--clusterAuthMode")) {
-        a.push( "--clusterAuthMode" )
-        a.push( "x509" )
-    }
-
     if ( !norepl ) {
         if ( master ){
             a.push( "--master" );
@@ -146,7 +141,7 @@ ReplTest.prototype.start = function( master , options , restart, norepl ){
         return conn;
     } else {
         var conn = _startMongod.apply(null, o);
-        if (jsTestOptions().keyFile || jsTestOptions().auth || jsTestOptions().useX509) {
+        if (jsTestOptions().keyFile || jsTestOptions().auth) {
             jsTest.authenticate(conn);
         }
         if (!master) {

@@ -7,9 +7,6 @@
  * and therefore cannot test modes that do not allow ssl.
  */
 
-// If we are running in use-x509 passthrough mode, turn it off
-// since it is not necessary for this test.
-TestData.useX509 = false;
 load("jstests/ssl/libs/ssl_helpers.js");
 
 // "sslAllowInvalidCertificates" is enabled to avoid hostname conflicts with our testing certs

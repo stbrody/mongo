@@ -1,6 +1,5 @@
 // Test changing the --sslMode and --clusterAuthMode 
 // parameters using setParameter
-TestData.useX509 = false;
 
 var SERVER_CERT = "jstests/libs/server.pem"
 var CA_CERT = "jstests/libs/ca.pem" 
