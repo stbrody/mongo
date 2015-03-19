@@ -11,7 +11,6 @@ var BAD_SAN_CERT = "jstests/libs/badSAN.pem";
 // but still need an SSL shell hence the test is placed
 // in the /ssl directory
 TestData.useX509 = false;
-TestData.useSSL = false;
 
 port = allocatePorts(1)[0];
 

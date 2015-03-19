@@ -424,12 +424,6 @@ MongoRunner.mongoOptions = function( opts ){
     opts.waitForConnect = (waitForConnect == undefined || waitForConnect == null) ?
         true : waitForConnect;
     
-    if( jsTestOptions().useSSL ) {
-        if (!opts.sslMode) opts.sslMode = "requireSSL";
-        if (!opts.sslPEMKeyFile) opts.sslPEMKeyFile = "jstests/libs/server.pem";
-        if (!opts.sslCAFile) opts.sslCAFile = "jstests/libs/ca.pem";
-    }
-
     if ( jsTestOptions().useX509 && !opts.clusterAuthMode ) {
         opts.clusterAuthMode = "x509";
     }
@@ -485,12 +479,6 @@ MongoRunner.mongodOptions = function( opts ){
 
     if( jsTestOptions().keyFile && !opts.keyFile) {
         opts.keyFile = jsTestOptions().keyFile
-    }
-
-    if( jsTestOptions().useSSL ) {
-        if (!opts.sslMode) opts.sslMode = "requireSSL";
-        if (!opts.sslPEMKeyFile) opts.sslPEMKeyFile = "jstests/libs/server.pem";
-        if (!opts.sslCAFile) opts.sslCAFile = "jstests/libs/ca.pem";
     }
 
     if ( jsTestOptions().useX509 && !opts.clusterAuthMode ) {

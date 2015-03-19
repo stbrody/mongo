@@ -158,7 +158,6 @@ jsTestOptions = function(){
                               authMechanism : TestData.authMechanism,
                               adminUser : TestData.adminUser || "admin",
                               adminPassword : TestData.adminPassword || "password",
-                              useSSL : TestData.useSSL,
                               useX509 : TestData.useX509});
     }
     return _jsTestOptions;

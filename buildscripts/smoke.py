@@ -589,7 +589,6 @@ def runTest(test, result):
                      'TestData.keyFileData = ' + ternary( keyFile , '"' + str(keyFileData) + '"' , 'null' ) + ";" + \
                      'TestData.authMechanism = ' + ternary( authMechanism,
                                                '"' + str(authMechanism) + '"', 'null') + ";" + \
-                     'TestData.useSSL = ' + ternary( use_ssl ) + ";" + \
                      'TestData.useX509 = ' + ternary( use_x509 ) + ";"
         # this updates the default data directory for mongod processes started through shell (src/mongo/shell/servers.js)
         evalString += 'MongoRunner.dataDir = "' + os.path.abspath(smoke_db_prefix + '/data/db') + '";'
