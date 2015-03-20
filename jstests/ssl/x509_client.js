@@ -51,8 +51,7 @@ function authAndTest(mongo) {
 print("1. Testing x.509 auth to mongod");
 var x509_options = {sslMode : "requireSSL",
                     sslPEMKeyFile : SERVER_CERT,
-                    sslCAFile : CA_CERT,
-                    clusterAuthMode: "x509"};
+                    sslCAFile : CA_CERT};
 
 var mongo = MongoRunner.runMongod(Object.merge(x509_options, {port: port, auth: ""}));
 
