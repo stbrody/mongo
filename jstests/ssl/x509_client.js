@@ -67,6 +67,7 @@ var st = new ShardingTest({ shards : 1,
                                 extraOptions : {"keyFile" : "jstests/libs/key1"},
                                 configOptions : x509_options,
                                 mongosOptions : x509_options,
+                                shardOptions : x509_options,
                             }});
 
 authAndTest(new Mongo("localhost:" + st.s0.port))
