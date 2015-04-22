@@ -86,14 +86,12 @@ ShardingTest = function( testName , numShards , verboseLevel , numMongos , other
     var keyFile = undefined
     var numConfigs = 1;
     otherParams = Object.merge( otherParams || {}, {} )
-    otherParams.extraOptions = otherParams.extraOptions || {}
 
     if( isObject( testName ) ){
         
         var params = Object.merge( testName, {} )
         
         testName = params.name || "test"
-
         otherParams = Object.merge(otherParams, params);
         otherParams = Object.merge(params.other || {}, otherParams);
 
@@ -157,6 +155,7 @@ ShardingTest = function( testName , numShards , verboseLevel , numMongos , other
         }
     }
 
+    otherParams.extraOptions = otherParams.extraOptions || {};
     otherParams.useHostname = otherParams.useHostname == undefined ?
         true : otherParams.useHostname;
     keyFile = otherParams.keyFile || otherParams.extraOptions.keyFile
@@ -334,6 +333,7 @@ ShardingTest = function( testName , numShards , verboseLevel , numMongos , other
         this.configRS = new ReplSetTest(rstOptions);
         this.configRS.startSet(startOptions);
         this.configRS.initiate();
+        this.configRS.getMaster(); // Wait for master to be elected before starting mongos
 
         this._configDB = this.configRS.getURL();
         this._configServers = this.configRS.nodes;
