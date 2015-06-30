@@ -40,6 +40,8 @@
 
 namespace mongo {
 
+class NamespaceString;
+
 /**
  * Implements the catalog manager for talking to replica set config servers.
  */
@@ -148,6 +150,14 @@ private:
      */
     StatusWith<BSONObj> _runConfigServerCommandWithNotMasterRetries(const std::string& dbName,
                                                                     const BSONObj& cmdObj);
+
+    /**
+     * Helper method for running a count command against a given target server with appropriate
+     * error handling.
+     */
+    StatusWith<long long> _runCountCommand(const HostAndPort& target,
+                                           const NamespaceString& ns,
+                                           BSONObj query);
 
     // Config server connection string
     ConnectionString _configServerConnectionString;

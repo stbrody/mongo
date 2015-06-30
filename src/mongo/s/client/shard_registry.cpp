@@ -36,10 +36,12 @@
 #include "mongo/client/query_fetcher.h"
 #include "mongo/client/remote_command_targeter.h"
 #include "mongo/client/remote_command_targeter_factory.h"
+#include "mongo/client/replica_set_monitor.h"
 #include "mongo/executor/task_executor.h"
 #include "mongo/s/catalog/catalog_manager.h"
 #include "mongo/s/catalog/type_shard.h"
 #include "mongo/s/client/shard.h"
+#include "mongo/s/client/shard_connection.h"
 #include "mongo/stdx/memory.h"
 #include "mongo/stdx/mutex.h"
 #include "mongo/util/log.h"
@@ -132,7 +134,7 @@ shared_ptr<Shard> ShardRegistry::lookupRSName(const string& name) const {
 }
 
 void ShardRegistry::remove(const ShardId& id) {
-    stdx::lock_guard<stdx::mutex> lk(_mutex);
+    stdx::unique_lock<stdx::mutex> lk(_mutex);
 
     for (ShardMap::iterator i = _lookup.begin(); i != _lookup.end();) {
         shared_ptr<Shard> s = i->second;
@@ -151,6 +153,10 @@ void ShardRegistry::remove(const ShardId& id) {
             ++i;
         }
     }
+
+    lk.unlock();
+    shardConnectionPool.removeHost(id);
+    ReplicaSetMonitor::remove(id);
 }
 
 void ShardRegistry::getAllShardIds(vector<ShardId>* all) const {
