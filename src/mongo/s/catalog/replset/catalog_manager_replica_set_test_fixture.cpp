@@ -37,6 +37,7 @@
 #include "mongo/client/remote_command_targeter_factory_mock.h"
 #include "mongo/client/remote_command_targeter_mock.h"
 #include "mongo/db/client.h"
+#include "mongo/db/commands.h"
 #include "mongo/db/namespace_string.h"
 #include "mongo/db/query/lite_parsed_query.h"
 #include "mongo/db/repl/replication_executor.h"
@@ -44,9 +45,12 @@
 #include "mongo/executor/network_interface_mock.h"
 #include "mongo/s/catalog/dist_lock_manager_mock.h"
 #include "mongo/s/catalog/replset/catalog_manager_replica_set.h"
+#include "mongo/s/catalog/type_changelog.h"
 #include "mongo/s/catalog/type_shard.h"
 #include "mongo/s/client/shard_registry.h"
 #include "mongo/s/grid.h"
+#include "mongo/s/write_ops/batched_command_request.h"
+#include "mongo/s/write_ops/batched_command_response.h"
 #include "mongo/stdx/memory.h"
 
 namespace mongo {
@@ -54,7 +58,9 @@ namespace mongo {
 using executor::NetworkInterfaceMock;
 using executor::NetworkTestEnv;
 
+using std::string;
 using std::vector;
+using unittest::assertGet;
 
 CatalogManagerReplSetTestFixture::CatalogManagerReplSetTestFixture() = default;
 
@@ -195,6 +201,69 @@ void CatalogManagerReplSetTestFixture::setupShards(const std::vector<ShardType>&
     });
 
     future.timed_get(kFutureTimeout);
+}
+
+void CatalogManagerReplSetTestFixture::expectCount(const HostAndPort& configHost,
+                                                   const NamespaceString& expectedNs,
+                                                   const BSONObj& expectedQuery,
+                                                   const StatusWith<long long>& response) {
+    onCommand([&](const RemoteCommandRequest& request) {
+        ASSERT_EQUALS(configHost, request.target);
+        string cmdName = request.cmdObj.firstElement().fieldName();
+        ASSERT_EQUALS("count", cmdName);
+        const NamespaceString nss(request.dbname, request.cmdObj.firstElement().String());
+        ASSERT_EQUALS(expectedNs.toString(), nss.toString());
+
+        ASSERT_EQUALS(expectedQuery, request.cmdObj["query"].Obj());
+
+        if (response.isOK()) {
+            return BSON("ok" << 1 << "n" << response.getValue());
+        }
+
+        BSONObjBuilder responseBuilder;
+        Command::appendCommandStatus(responseBuilder, response.getStatus());
+        return responseBuilder.obj();
+    });
+}
+
+void CatalogManagerReplSetTestFixture::expectLogChange(const HostAndPort& configHost,
+                                                       const string& clientAddress,
+                                                       const string& what,
+                                                       const string& ns,
+                                                       const BSONObj& detail) {
+    onCommand([&](const RemoteCommandRequest& request) {
+        ASSERT_EQUALS(configHost, request.target);
+        ASSERT_EQUALS("config", request.dbname);
+        BSONObj expectedCreateCmd = BSON("create" << ChangeLogType::ConfigNS << "capped" << true
+                                                  << "size" << 1024 * 1024 * 10);
+        ASSERT_EQUALS(expectedCreateCmd, request.cmdObj);
+
+        return BSON("ok" << 1);
+    });
+
+    onCommand([&](const RemoteCommandRequest& request) {
+        ASSERT_EQUALS(configHost, request.target);
+        ASSERT_EQUALS("config", request.dbname);
+
+        BatchedInsertRequest actualBatchedInsert;
+        std::string errmsg;
+        ASSERT_TRUE(actualBatchedInsert.parseBSON(request.dbname, request.cmdObj, &errmsg));
+        ASSERT_EQUALS(ChangeLogType::ConfigNS, actualBatchedInsert.getNS().ns());
+        auto inserts = actualBatchedInsert.getDocuments();
+        ASSERT_EQUALS(1U, inserts.size());
+        BSONObj insert = inserts.front();
+
+        auto actualChangeLog = assertGet(ChangeLogType::fromBSON(insert));
+        ASSERT_EQUALS(clientAddress, actualChangeLog.getClientAddr());
+        ASSERT_EQUALS(what, actualChangeLog.getWhat());
+        ASSERT_EQUALS(ns, actualChangeLog.getNS());
+        ASSERT_EQUALS(detail, actualChangeLog.getDetails());
+
+        BatchedCommandResponse response;
+        response.setOk(true);
+
+        return response.toBSON();
+    });
 }
 
 }  // namespace mongo

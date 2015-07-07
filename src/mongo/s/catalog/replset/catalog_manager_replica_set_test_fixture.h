@@ -98,6 +98,17 @@ protected:
      */
     void setupShards(const std::vector<ShardType>& shards);
 
+    void expectCount(const HostAndPort& configHost,
+                     const NamespaceString& expectedNs,
+                     const BSONObj& expectedQuery,
+                     const StatusWith<long long>& response);
+
+    void expectLogChange(const HostAndPort& configHost,
+                         const std::string& clientAddress,
+                         const std::string& what,
+                         const std::string& ns,
+                         const BSONObj& detail);
+
     void setUp() override;
 
     void tearDown() override;
