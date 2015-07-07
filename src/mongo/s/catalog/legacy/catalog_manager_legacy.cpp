@@ -280,7 +280,7 @@ Status CatalogManagerLegacy::shardCollection(OperationContext* txn,
                                              const string& ns,
                                              const ShardKeyPattern& fieldsAndOrder,
                                              bool unique,
-                                             vector<BSONObj>* initPoints,
+                                             const vector<BSONObj>& initPoints,
                                              set<ShardId>* initShardIds) {
     // Lock the collection globally so that no other mongos can try to shard or drop the collection
     // at the same time.
@@ -339,13 +339,13 @@ Status CatalogManagerLegacy::shardCollection(OperationContext* txn,
     }
 
     collectionDetail.append("initShards", initialShards);
-    collectionDetail.append("numChunks", static_cast<int>(initPoints->size() + 1));
+    collectionDetail.append("numChunks", static_cast<int>(initPoints.size() + 1));
 
     logChange(
         txn->getClient()->clientAddress(true), "shardCollection.start", ns, collectionDetail.obj());
 
     ChunkManagerPtr manager(new ChunkManager(ns, fieldsAndOrder, unique));
-    manager->createFirstChunks(dbPrimaryShardId, initPoints, initShardIds);
+    manager->createFirstChunks(dbPrimaryShardId, &initPoints, initShardIds);
     manager->loadExistingRanges(nullptr);
 
     CollectionInfo collInfo;

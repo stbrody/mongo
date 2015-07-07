@@ -993,6 +993,7 @@ public:
              int,
              string& errmsg,
              BSONObjBuilder& result) {
+        log() << "!!!!!!!!!! RECIEVED SSV CMD: " << cmdObj.jsonString();
         // Compatibility error for < v3.0 mongoses still active in the cluster
         // TODO: Remove post-3.0
         if (!cmdObj["serverID"].eoo()) {
