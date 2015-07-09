@@ -30,6 +30,7 @@
 
 #include "mongo/platform/basic.h"
 
+#include <set>
 #include <string>
 #include <vector>
 
@@ -60,6 +61,7 @@ namespace {
 
 using executor::NetworkInterfaceMock;
 using executor::TaskExecutor;
+using std::set;
 using std::string;
 using std::vector;
 using stdx::chrono::milliseconds;
@@ -137,7 +139,7 @@ public:
         return actualVersion;
     }
 
-    void expectReloadChunks(const std::string& ns, const vector<BSONObj>& chunks) {
+    void expectReloadChunks(const std::string& ns, const vector<ChunkType>& chunks) {
         onFindCommand([&](const RemoteCommandRequest& request) {
             ASSERT_EQUALS(configHost, request.target);
             const NamespaceString nss(request.dbname, request.cmdObj.firstElement().String());
@@ -154,7 +156,13 @@ public:
             ASSERT_EQ(expectedSort, query->getSort());
             ASSERT_FALSE(query->getLimit().is_initialized());
 
-            return chunks;
+            vector<BSONObj> chunksToReturn;
+
+            std::transform(chunks.begin(),
+                           chunks.end(),
+                           std::back_inserter(chunksToReturn),
+                           [](const ChunkType& chunk) { return chunk.toBSON(); });
+            return chunksToReturn;
         });
     }
 
@@ -228,8 +236,8 @@ public:
     }
 
 protected:
-    const HostAndPort configHost{"TestHost1"};
-    const HostAndPort clientHost{"client1:12345"};
+    const HostAndPort configHost{"configHost1"};
+    const HostAndPort clientHost{"clientHost1"};
 };
 
 TEST_F(ShardCollectionTest, shardCollectionDistLockFails) {
@@ -356,7 +364,7 @@ TEST_F(ShardCollectionTest, shardCollectionNoInitialChunksOrData) {
             configHost, clientHost.toString(), "shardCollection.start", ns, logChangeDetail);
     }
 
-    // Report that no documents exist for the given collection on the target shard
+    // Report that no documents exist for the given collection on the primary shard
     expectCount(shardHost, NamespaceString(ns), BSONObj(), 0);
 
     // Handle the write to create the initial chunk.
@@ -368,7 +376,7 @@ TEST_F(ShardCollectionTest, shardCollectionNoInitialChunksOrData) {
     expectedChunk.setVersion(actualVersion);
 
     // Handle the query to load the newly created chunk
-    expectReloadChunks(ns, {expectedChunk.toBSON()});
+    expectReloadChunks(ns, {expectedChunk});
 
     CollectionType expectedCollection;
     expectedCollection.setNs(NamespaceString(ns));
@@ -385,8 +393,180 @@ TEST_F(ShardCollectionTest, shardCollectionNoInitialChunksOrData) {
     expectGetDatabase(db);
     expectGetDatabase(db);
     expectReloadCollection(expectedCollection);
-    expectReloadChunks(ns, {expectedChunk.toBSON()});
+    expectReloadChunks(ns, {expectedChunk});
     expectLoadNewestChunk(ns, expectedChunk);
+
+    // Respond to request to write final changelog entry indicating success.
+    expectChangeLogInsert(configHost,
+                          clientHost.toString(),
+                          "shardCollection",
+                          ns,
+                          BSON("version"
+                               << ""));
+
+    future.timed_get(kFutureTimeout);
+}
+
+TEST_F(ShardCollectionTest, shardCollectionWithInitialChunks) {
+    // Initial setup
+    const HostAndPort shard0Host{"shardHost0"};
+    const HostAndPort shard1Host{"shardHost1"};
+    const HostAndPort shard2Host{"shardHost2"};
+    ShardType shard0;
+    shard0.setName("shard0");
+    shard0.setHost(shard0Host.toString());
+
+    ShardType shard1;
+    shard1.setName("shard1");
+    shard1.setHost(shard1Host.toString());
+
+    ShardType shard2;
+    shard2.setName("shard2");
+    shard2.setHost(shard2Host.toString());
+
+    setupShards(vector<ShardType>{shard0, shard1, shard2});
+
+    RemoteCommandTargeterMock::get(grid.shardRegistry()->getShard(shard0.getName())->getTargeter())
+        ->setFindHostReturnValue(shard0Host);
+    RemoteCommandTargeterMock::get(grid.shardRegistry()->getShard(shard1.getName())->getTargeter())
+        ->setFindHostReturnValue(shard1Host);
+    RemoteCommandTargeterMock::get(grid.shardRegistry()->getShard(shard2.getName())->getTargeter())
+        ->setFindHostReturnValue(shard2Host);
+
+    string ns = "db1.foo";
+
+    DatabaseType db;
+    db.setName("db1");
+    db.setPrimary(shard0.getName());
+    db.setSharded(true);
+
+    ShardKeyPattern keyPattern(BSON("_id" << 1));
+
+    BSONObj splitPoint0 = BSON("_id" << 1);
+    BSONObj splitPoint1 = BSON("_id" << 100);
+    BSONObj splitPoint2 = BSON("_id" << 200);
+    BSONObj splitPoint3 = BSON("_id" << 300);
+
+    ChunkVersion expectedVersion;
+    expectedVersion.incEpoch();
+    expectedVersion.incMajor();
+
+    ChunkType expectedChunk0;
+    expectedChunk0.setNS(ns);
+    expectedChunk0.setShard(shard0.getName());
+    expectedChunk0.setMin(keyPattern.getKeyPattern().globalMin());
+    expectedChunk0.setMax(splitPoint0);
+    expectedChunk0.setName(Chunk::genID(ns, expectedChunk0.getMin()));
+    expectedChunk0.setVersion(expectedVersion);
+    expectedVersion.incMinor();
+
+    ChunkType expectedChunk1;
+    expectedChunk1.setNS(ns);
+    expectedChunk1.setShard(shard1.getName());
+    expectedChunk1.setMin(splitPoint0);
+    expectedChunk1.setMax(splitPoint1);
+    expectedChunk1.setName(Chunk::genID(ns, expectedChunk1.getMin()));
+    expectedChunk1.setVersion(expectedVersion);
+    expectedVersion.incMinor();
+
+    ChunkType expectedChunk2;
+    expectedChunk2.setNS(ns);
+    expectedChunk2.setShard(shard2.getName());
+    expectedChunk2.setMin(splitPoint1);
+    expectedChunk2.setMax(splitPoint2);
+    expectedChunk2.setName(Chunk::genID(ns, expectedChunk2.getMin()));
+    expectedChunk2.setVersion(expectedVersion);
+    expectedVersion.incMinor();
+
+    ChunkType expectedChunk3;
+    expectedChunk3.setNS(ns);
+    expectedChunk3.setShard(shard0.getName());
+    expectedChunk3.setMin(splitPoint2);
+    expectedChunk3.setMax(splitPoint3);
+    expectedChunk3.setName(Chunk::genID(ns, expectedChunk3.getMin()));
+    expectedChunk3.setVersion(expectedVersion);
+    expectedVersion.incMinor();
+
+    ChunkType expectedChunk4;
+    expectedChunk4.setNS(ns);
+    expectedChunk4.setShard(shard1.getName());
+    expectedChunk4.setMin(splitPoint3);
+    expectedChunk4.setMax(keyPattern.getKeyPattern().globalMax());
+    expectedChunk4.setName(Chunk::genID(ns, expectedChunk4.getMin()));
+    expectedChunk4.setVersion(expectedVersion);
+
+    vector<ChunkType> expectedChunks{
+        expectedChunk0, expectedChunk1, expectedChunk2, expectedChunk3, expectedChunk4};
+
+    // Now start actually sharding the collection.
+    auto future = launchAsync([&] {
+        set<ShardId> shards{shard0.getName(), shard1.getName(), shard2.getName()};
+        ASSERT_OK(catalogManager()->shardCollection(
+            operationContext(),
+            ns,
+            keyPattern,
+            true,
+            vector<BSONObj>{splitPoint0, splitPoint1, splitPoint2, splitPoint3},
+            &shards));
+    });
+
+    distLock()->expectLock(
+        [&](StringData name,
+            StringData whyMessage,
+            milliseconds waitFor,
+            milliseconds lockTryInterval) {
+            ASSERT_EQUALS(ns, name);
+            ASSERT_EQUALS("shardCollection", whyMessage);
+        },
+        Status::OK());
+
+    expectGetDatabase(db);
+
+    // Report that no chunks exist for the given collection
+    expectCount(configHost, NamespaceString(ChunkType::ConfigNS), BSON(ChunkType::ns(ns)), 0);
+
+    // Respond to write to change log
+    {
+        BSONObj logChangeDetail =
+            BSON("shardKey" << keyPattern.toBSON() << "collection" << ns << "primary"
+                            << shard0.getName() + ":" + shard0.getHost() << "initShards"
+                            << BSON_ARRAY(shard0.getName() << shard1.getName() << shard2.getName())
+                            << "numChunks" << (int)expectedChunks.size());
+        expectChangeLogCreate(configHost, BSON("ok" << 1));
+        expectChangeLogInsert(
+            configHost, clientHost.toString(), "shardCollection.start", ns, logChangeDetail);
+    }
+
+    for (auto& expectedChunk : expectedChunks) {
+        // Handle the write to create the initial chunk.
+        ChunkVersion actualVersion = expectCreateChunk(expectedChunk);
+
+        // Since the generated epoch OID will not match the one we initialized expectedChunk with
+        // update the stored version in expectedChunk so that it matches what was actually
+        // written, to avoid problems relating to non-matching epochs down the road.
+        expectedChunk.setVersion(actualVersion);
+    }
+
+    // Handle the query to load the newly created chunk
+    expectReloadChunks(ns, expectedChunks);
+
+    CollectionType expectedCollection;
+    expectedCollection.setNs(NamespaceString(ns));
+    expectedCollection.setEpoch(expectedChunks[4].getVersion().epoch());
+    expectedCollection.setUpdatedAt(
+        Date_t::fromMillisSinceEpoch(expectedChunks[4].getVersion().toLong()));
+    expectedCollection.setKeyPattern(keyPattern.toBSON());
+    expectedCollection.setUnique(true);
+
+    // Handle the update to the collection entry in config.collectinos.
+    expectUpdateCollection(expectedCollection);
+
+    // Respond to various requests for reloading parts of the chunk/collection metadata.
+    expectGetDatabase(db);
+    expectGetDatabase(db);
+    expectReloadCollection(expectedCollection);
+    expectReloadChunks(ns, expectedChunks);
+    expectLoadNewestChunk(ns, expectedChunks[4]);
 
     // Respond to request to write final changelog entry indicating success.
     expectChangeLogInsert(configHost,
