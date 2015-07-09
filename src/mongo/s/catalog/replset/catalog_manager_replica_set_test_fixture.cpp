@@ -172,8 +172,6 @@ void CatalogManagerReplSetTestFixture::onFindCommand(NetworkTestEnv::OnFindComma
 }
 
 void CatalogManagerReplSetTestFixture::setupShards(const std::vector<ShardType>& shards) {
-    configTargeter()->setFindHostReturnValue(HostAndPort("config:123"));
-
     auto future = launchAsync([this] { shardRegistry()->reload(); });
 
     onFindCommand([&shards](const RemoteCommandRequest& request) {
@@ -214,7 +212,11 @@ void CatalogManagerReplSetTestFixture::expectCount(const HostAndPort& configHost
         const NamespaceString nss(request.dbname, request.cmdObj.firstElement().String());
         ASSERT_EQUALS(expectedNs.toString(), nss.toString());
 
-        ASSERT_EQUALS(expectedQuery, request.cmdObj["query"].Obj());
+        if (expectedQuery.isEmpty()) {
+            ASSERT_TRUE(request.cmdObj["query"].eoo());
+        } else {
+            ASSERT_EQUALS(expectedQuery, request.cmdObj["query"].Obj());
+        }
 
         if (response.isOK()) {
             return BSON("ok" << 1 << "n" << response.getValue());
@@ -226,11 +228,8 @@ void CatalogManagerReplSetTestFixture::expectCount(const HostAndPort& configHost
     });
 }
 
-void CatalogManagerReplSetTestFixture::expectLogChange(const HostAndPort& configHost,
-                                                       const string& clientAddress,
-                                                       const string& what,
-                                                       const string& ns,
-                                                       const BSONObj& detail) {
+void CatalogManagerReplSetTestFixture::expectChangeLogCreate(const HostAndPort& configHost,
+                                                             const BSONObj& response) {
     onCommand([&](const RemoteCommandRequest& request) {
         ASSERT_EQUALS(configHost, request.target);
         ASSERT_EQUALS("config", request.dbname);
@@ -240,7 +239,13 @@ void CatalogManagerReplSetTestFixture::expectLogChange(const HostAndPort& config
 
         return BSON("ok" << 1);
     });
+}
 
+void CatalogManagerReplSetTestFixture::expectChangeLogInsert(const HostAndPort& configHost,
+                                                             const string& clientAddress,
+                                                             const string& what,
+                                                             const string& ns,
+                                                             const BSONObj& detail) {
     onCommand([&](const RemoteCommandRequest& request) {
         ASSERT_EQUALS(configHost, request.target);
         ASSERT_EQUALS("config", request.dbname);

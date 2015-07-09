@@ -36,6 +36,8 @@
 #include <map>
 #include <set>
 
+#include "mongo/client/remote_command_targeter.h"
+#include "mongo/db/commands.h"
 #include "mongo/db/namespace_string.h"
 #include "mongo/db/query/index_bounds_builder.h"
 #include "mongo/db/query/query_planner.h"
@@ -338,11 +340,17 @@ void ChunkManager::calcInitSplitsAndShards(const ShardId& primaryShardId,
         // discover split points
         {
             const auto primaryShard = grid.shardRegistry()->getShard(primaryShardId);
-            // get stats to see if there is any data
-            ScopedDbConnection shardConn(primaryShard->getConnString());
+            auto targetStatus =
+                primaryShard->getTargeter()->findHost({ReadPreference::PrimaryPreferred, TagSet{}});
+            uassertStatusOK(targetStatus);
 
-            numObjects = shardConn->count(getns());
-            shardConn.done();
+            NamespaceString nss(getns());
+            auto result = grid.shardRegistry()->runCommand(
+                targetStatus.getValue(), nss.db().toString(), BSON("count" << nss.coll()));
+
+            uassertStatusOK(result.getStatus());
+            uassertStatusOK(Command::getStatusFromCommandResult(result.getValue()));
+            numObjects = result.getValue()["n"].numberLong();
         }
 
         if (numObjects > 0)

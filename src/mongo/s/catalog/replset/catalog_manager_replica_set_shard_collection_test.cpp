@@ -37,13 +37,18 @@
 #include "mongo/db/commands.h"
 #include "mongo/executor/network_interface_mock.h"
 #include "mongo/executor/task_executor.h"
+#include "mongo/s/catalog/dist_lock_manager_mock.h"
 #include "mongo/s/catalog/replset/catalog_manager_replica_set.h"
 #include "mongo/s/catalog/replset/catalog_manager_replica_set_test_fixture.h"
 #include "mongo/s/catalog/type_changelog.h"
 #include "mongo/s/catalog/type_chunk.h"
+#include "mongo/s/catalog/type_collection.h"
 #include "mongo/s/catalog/type_database.h"
 #include "mongo/s/catalog/type_shard.h"
+#include "mongo/s/chunk.h"
 #include "mongo/s/client/shard_registry.h"
+#include "mongo/s/grid.h"
+#include "mongo/s/shard_key_pattern.h"
 #include "mongo/s/write_ops/batched_command_request.h"
 #include "mongo/s/write_ops/batched_command_response.h"
 #include "mongo/stdx/chrono.h"
@@ -57,11 +62,335 @@ using executor::NetworkInterfaceMock;
 using executor::TaskExecutor;
 using std::string;
 using std::vector;
+using stdx::chrono::milliseconds;
 using unittest::assertGet;
 
-static const stdx::chrono::seconds kFutureTimeout{5};
+class ShardCollectionTest : public CatalogManagerReplSetTestFixture {
+public:
+    void setUp() override {
+        CatalogManagerReplSetTestFixture::setUp();
+        configTargeter()->setFindHostReturnValue(configHost);
+        getMessagingPort()->setRemote(clientHost);
+    }
 
-TEST_F(CatalogManagerReplSetTestFixture, shardCollectionTest) {}
+    void expectGetDatabase(const DatabaseType& expectedDb) {
+        onFindCommand([&](const RemoteCommandRequest& request) {
+            ASSERT_EQUALS(configHost, request.target);
+            const NamespaceString nss(request.dbname, request.cmdObj.firstElement().String());
+            ASSERT_EQ(DatabaseType::ConfigNS, nss.ns());
+
+            auto query =
+                assertGet(LiteParsedQuery::makeFromFindCommand(nss, request.cmdObj, false));
+
+            ASSERT_EQ(DatabaseType::ConfigNS, query->ns());
+            ASSERT_EQ(BSON(DatabaseType::name(expectedDb.getName())), query->getFilter());
+            ASSERT_EQ(BSONObj(), query->getSort());
+            ASSERT_EQ(1, query->getLimit().get());
+
+            return vector<BSONObj>{expectedDb.toBSON()};
+        });
+    }
+
+protected:
+    const HostAndPort configHost{"TestHost1"};
+    const HostAndPort clientHost{"client1:12345"};
+};
+
+TEST_F(ShardCollectionTest, shardCollectionDistLockFails) {
+    distLock()->expectLock(
+        [](StringData name,
+           StringData whyMessage,
+           milliseconds waitFor,
+           milliseconds lockTryInterval) {
+            ASSERT_EQUALS("test.foo", name);
+            ASSERT_EQUALS("shardCollection", whyMessage);
+        },
+        Status(ErrorCodes::LockBusy, "lock already held"));
+
+    ShardKeyPattern keyPattern(BSON("_id" << 1));
+    ASSERT_EQUALS(
+        ErrorCodes::LockBusy,
+        catalogManager()->shardCollection(
+            operationContext(), "test.foo", keyPattern, false, vector<BSONObj>{}, nullptr));
+}
+
+TEST_F(ShardCollectionTest, shardCollectionAnotherMongosSharding) {
+    ShardType shard;
+    shard.setName("shard0");
+    shard.setHost("shardHost");
+
+    setupShards(vector<ShardType>{shard});
+
+    DatabaseType db;
+    db.setName("db1");
+    db.setPrimary(shard.getName());
+    db.setSharded(true);
+
+    string ns = "db1.foo";
+
+    ShardKeyPattern keyPattern(BSON("_id" << 1));
+    auto future = launchAsync([&] {
+        ASSERT_EQUALS(ErrorCodes::AlreadyInitialized,
+                      catalogManager()->shardCollection(
+                          operationContext(), ns, keyPattern, false, vector<BSONObj>{}, nullptr));
+    });
+
+    distLock()->expectLock(
+        [&](StringData name,
+            StringData whyMessage,
+            milliseconds waitFor,
+            milliseconds lockTryInterval) {
+            ASSERT_EQUALS(ns, name);
+            ASSERT_EQUALS("shardCollection", whyMessage);
+        },
+        Status::OK());
+
+    expectGetDatabase(db);
+
+    // Report that chunks exist for the given collection, indicating that another mongos must have
+    // already started sharding the collection.
+    expectCount(configHost, NamespaceString(ChunkType::ConfigNS), BSON(ChunkType::ns(ns)), 1);
+
+    future.timed_get(kFutureTimeout);
+}
+
+TEST_F(ShardCollectionTest, shardCollectionNoInitialChunksOrData) {
+    const HostAndPort shardHost{"shardHost"};
+    ShardType shard;
+    shard.setName("shard0");
+    shard.setHost(shardHost.toString());
+
+    setupShards(vector<ShardType>{shard});
+
+    RemoteCommandTargeterMock::get(grid.shardRegistry()->getShard(shard.getName())->getTargeter())
+        ->setFindHostReturnValue(shardHost);
+
+    DatabaseType db;
+    db.setName("db1");
+    db.setPrimary(shard.getName());
+    db.setSharded(true);
+
+    string ns = "db1.foo";
+
+    ShardKeyPattern keyPattern(BSON("_id" << 1));
+    auto future = launchAsync([&] {
+        ASSERT_OK(catalogManager()->shardCollection(
+            operationContext(), ns, keyPattern, false, vector<BSONObj>{}, nullptr));
+    });
+
+    distLock()->expectLock(
+        [&](StringData name,
+            StringData whyMessage,
+            milliseconds waitFor,
+            milliseconds lockTryInterval) {
+            ASSERT_EQUALS(ns, name);
+            ASSERT_EQUALS("shardCollection", whyMessage);
+        },
+        Status::OK());
+
+    expectGetDatabase(db);
+
+    // Report that no chunks exist for the given collection
+    expectCount(configHost, NamespaceString(ChunkType::ConfigNS), BSON(ChunkType::ns(ns)), 0);
+
+    // Respond to write to change log
+    BSONObj logChangeDetail =
+        BSON("shardKey" << keyPattern.toBSON() << "collection" << ns << "primary"
+                        << shard.getName() + ":" + shard.getHost() << "initShards" << BSONArray()
+                        << "numChunks" << 1);
+    expectChangeLogCreate(configHost, BSON("ok" << 1));
+    expectChangeLogInsert(
+        configHost, clientHost.toString(), "shardCollection.start", ns, logChangeDetail);
+
+    // Report that no documents exist for the given collection on the target shard
+    expectCount(shardHost, NamespaceString(ns), BSONObj(), 0);
+
+    std::cout << "!!!!!!!!!!PAST COUNT !!!!!!!!!!!!!!!!!!!!!!" << std::endl;
+
+    ChunkType expectedChunk;
+    expectedChunk.setName(Chunk::genID(ns, keyPattern.getKeyPattern().globalMin()));
+    expectedChunk.setNS(ns);
+    expectedChunk.setMin(keyPattern.getKeyPattern().globalMin());
+    expectedChunk.setMax(keyPattern.getKeyPattern().globalMax());
+    expectedChunk.setShard(shard.getName());
+    {
+        ChunkVersion expectedVersion;
+        expectedVersion.incEpoch();
+        expectedVersion.incMajor();
+        expectedChunk.setVersion(expectedVersion);
+    }
+
+
+    // Handle the update to create the initial chunk.
+    onCommand([&](const RemoteCommandRequest& request) {
+        ASSERT_EQUALS(configHost, request.target);
+        ASSERT_EQUALS("config", request.dbname);
+
+        BatchedUpdateRequest actualBatchedUpdate;
+        std::string errmsg;
+        ASSERT_TRUE(actualBatchedUpdate.parseBSON(request.dbname, request.cmdObj, &errmsg));
+        ASSERT_EQUALS(ChunkType::ConfigNS, actualBatchedUpdate.getNS().ns());
+        auto updates = actualBatchedUpdate.getUpdates();
+        ASSERT_EQUALS(1U, updates.size());
+        auto update = updates.front();
+
+        ASSERT_TRUE(update->getUpsert());
+        ASSERT_FALSE(update->getMulti());
+        ASSERT_EQUALS(BSON(ChunkType::name(expectedChunk.getName())), update->getQuery());
+
+        BSONObj chunkObj = update->getUpdateExpr();
+        std::cout << "CHUNK: " << chunkObj.jsonString() << std::endl;
+        ASSERT_EQUALS(expectedChunk.getName(), chunkObj["_id"].String());
+        ASSERT_EQUALS(Timestamp(expectedChunk.getVersion().toLong()),
+                      chunkObj[ChunkType::DEPRECATED_lastmod()].timestamp());
+        // Can't check the chunk version's epoch b/c they won't match since it's a randomly
+        // generated OID so just check that the field exists and is *a* OID.
+        ASSERT_EQUALS(jstOID, chunkObj[ChunkType::DEPRECATED_epoch()].type());
+        ASSERT_EQUALS(expectedChunk.getNS(), chunkObj[ChunkType::ns()].String());
+        ASSERT_EQUALS(expectedChunk.getMin(), chunkObj[ChunkType::min()].Obj());
+        ASSERT_EQUALS(expectedChunk.getMax(), chunkObj[ChunkType::max()].Obj());
+        ASSERT_EQUALS(expectedChunk.getShard(), chunkObj[ChunkType::shard()].String());
+
+        // Since the generated OID will not match the one we initialized expectedChunk with,
+        // update the stored version in expectedChunk so that it matches what was actually written,
+        // to avoid problems relating to non-matching epochs down the road.
+        ChunkVersion actualVersion = ChunkVersion::fromBSON(chunkObj);
+        expectedChunk.setVersion(actualVersion);
+
+        BatchedCommandResponse response;
+        response.setOk(true);
+        response.setNModified(1);
+
+        return response.toBSON();
+    });
+    std::cout << "!!!!!!!!!PAST INITIAL CHUNK UPSERT!!!!!!!!!!!!!!!!!!!!!!" << std::endl;
+
+    // Handle the query to load the newly created chunk
+    onFindCommand([&](const RemoteCommandRequest& request) {
+        ASSERT_EQUALS(configHost, request.target);
+        const NamespaceString nss(request.dbname, request.cmdObj.firstElement().String());
+        ASSERT_EQ(nss.ns(), ChunkType::ConfigNS);
+
+        auto query = assertGet(LiteParsedQuery::makeFromFindCommand(nss, request.cmdObj, false));
+        BSONObj expectedQuery =
+            BSON(ChunkType::ns(ns) << ChunkType::DEPRECATED_lastmod << GTE << Timestamp());
+        BSONObj expectedSort = BSON(ChunkType::DEPRECATED_lastmod() << 1);
+
+        ASSERT_EQ(ChunkType::ConfigNS, query->ns());
+        ASSERT_EQ(expectedQuery, query->getFilter());
+        ASSERT_EQ(expectedSort, query->getSort());
+        ASSERT_FALSE(query->getLimit().is_initialized());
+
+        return vector<BSONObj>{expectedChunk.toBSON()};
+    });
+    std::cout << "!!!!!!!!!PAST CHUNK RELOADING!!!!!!!!!!!!!!!!!!!!!!" << std::endl;
+
+    CollectionType expectedCollection;
+    expectedCollection.setNs(NamespaceString(ns));
+    expectedCollection.setEpoch(expectedChunk.getVersion().epoch());
+    expectedCollection.setUpdatedAt(
+        Date_t::fromMillisSinceEpoch(expectedChunk.getVersion().toLong()));
+    expectedCollection.setKeyPattern(keyPattern.toBSON());
+    expectedCollection.setUnique(false);
+
+    // Handle the update to the collection entry in config.collectinos.
+    onCommand([&](const RemoteCommandRequest& request) {
+        ASSERT_EQUALS(configHost, request.target);
+        ASSERT_EQUALS("config", request.dbname);
+
+        BatchedUpdateRequest actualBatchedUpdate;
+        std::string errmsg;
+        ASSERT_TRUE(actualBatchedUpdate.parseBSON(request.dbname, request.cmdObj, &errmsg));
+        ASSERT_EQUALS(CollectionType::ConfigNS, actualBatchedUpdate.getNS().ns());
+        auto updates = actualBatchedUpdate.getUpdates();
+        ASSERT_EQUALS(1U, updates.size());
+        auto update = updates.front();
+
+        ASSERT_TRUE(update->getUpsert());
+        ASSERT_FALSE(update->getMulti());
+        ASSERT_EQUALS(BSON(CollectionType::fullNs(ns)), update->getQuery());
+        ASSERT_EQUALS(expectedCollection.toBSON(), update->getUpdateExpr());
+
+        BatchedCommandResponse response;
+        response.setOk(true);
+        response.setNModified(1);
+
+        return response.toBSON();
+    });
+    std::cout << "!!!!!!!!!PAST COLLECTION UPDATE!!!!!!!!!!!!!!!!!!!!!!" << std::endl;
+    expectGetDatabase(db);
+    std::cout << "!!!!!!!!!PAST DATABASE RELOAD!!!!!!!!!!!!!!!!!!!!!!" << std::endl;
+    expectGetDatabase(db);
+    std::cout << "!!!!!!!!!PAST SECOND DATABASE RELOAD!!!!!!!!!!!!!!!!!!!!!!" << std::endl;
+
+    // Respond to query to reload collection definition.
+    onFindCommand([&](const RemoteCommandRequest& request) {
+        ASSERT_EQUALS(configHost, request.target);
+        const NamespaceString nss(request.dbname, request.cmdObj.firstElement().String());
+        ASSERT_EQ(nss.ns(), CollectionType::ConfigNS);
+
+        auto query = assertGet(LiteParsedQuery::makeFromFindCommand(nss, request.cmdObj, false));
+
+        ASSERT_EQ(query->ns(), CollectionType::ConfigNS);
+        {
+            BSONObjBuilder b;
+            b.appendRegex(CollectionType::fullNs(),
+                          string(str::stream() << "^" << nsToDatabase(ns) << "\\."));
+            ASSERT_EQ(query->getFilter(), b.obj());
+        }
+        ASSERT_EQ(query->getSort(), BSONObj());
+
+        return vector<BSONObj>{expectedCollection.toBSON()};
+    });
+
+    std::cout << "!!!!!!!!!PAST RELOADING COLLECTION DEFINITION!!!!!!!!!!!!!!!!!!!!!!" << std::endl;
+    onFindCommand([&](const RemoteCommandRequest& request) {
+        ASSERT_EQUALS(configHost, request.target);
+        const NamespaceString nss(request.dbname, request.cmdObj.firstElement().String());
+        ASSERT_EQ(nss.ns(), ChunkType::ConfigNS);
+
+        auto query = assertGet(LiteParsedQuery::makeFromFindCommand(nss, request.cmdObj, false));
+        BSONObj expectedQuery =
+            BSON(ChunkType::ns(ns) << ChunkType::DEPRECATED_lastmod << GTE << Timestamp());
+        BSONObj expectedSort = BSON(ChunkType::DEPRECATED_lastmod() << 1);
+
+        ASSERT_EQ(ChunkType::ConfigNS, query->ns());
+        ASSERT_EQ(expectedQuery, query->getFilter());
+        ASSERT_EQ(expectedSort, query->getSort());
+        ASSERT_FALSE(query->getLimit().is_initialized());
+
+        return vector<BSONObj>{expectedChunk.toBSON()};
+    });
+    std::cout << "!!!!!!!!!PAST RELOADING CHUNKS DEFINITIONS!!!!!!!!!!!!!!!!!!!!!!" << std::endl;
+
+    onFindCommand([&](const RemoteCommandRequest& request) {
+        ASSERT_EQUALS(configHost, request.target);
+        const NamespaceString nss(request.dbname, request.cmdObj.firstElement().String());
+        ASSERT_EQ(nss.ns(), ChunkType::ConfigNS);
+
+        auto query = assertGet(LiteParsedQuery::makeFromFindCommand(nss, request.cmdObj, false));
+        BSONObj expectedQuery = BSON(ChunkType::ns(ns));
+        BSONObj expectedSort = BSON(ChunkType::DEPRECATED_lastmod() << -1);
+
+        ASSERT_EQ(ChunkType::ConfigNS, query->ns());
+        ASSERT_EQ(expectedQuery, query->getFilter());
+        ASSERT_EQ(expectedSort, query->getSort());
+        ASSERT_EQ(1, query->getLimit().get());
+
+        return vector<BSONObj>{expectedChunk.toBSON()};
+    });
+
+    std::cout << "!!!!!!!!!PAST LOADING NEWEST CHUNK!!!!!!!!!!!!!!!!!!!!!!" << std::endl;
+
+    expectChangeLogInsert(configHost,
+                          clientHost.toString(),
+                          "shardCollection",
+                          ns,
+                          BSON("version"
+                               << ""));
+
+    future.timed_get(kFutureTimeout);
+}
 
 }  // namespace
 }  // namespace mongo

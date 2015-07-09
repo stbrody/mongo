@@ -182,7 +182,8 @@ TEST_F(RemoveShardTest, RemoveShardStartDraining) {
         return vector<BSONObj>{remainingShard.toBSON()};
     });
 
-    expectLogChange(
+    expectChangeLogCreate(configHost, BSON("ok" << 1));
+    expectChangeLogInsert(
         configHost, clientHost.toString(), "removeShard.start", "", BSON("shard" << shardName));
 
     future.timed_get(kFutureTimeout);
@@ -347,7 +348,8 @@ TEST_F(RemoveShardTest, RemoveShardCompletion) {
         return vector<BSONObj>{remainingShard.toBSON()};
     });
 
-    expectLogChange(
+    expectChangeLogCreate(configHost, BSON("ok" << 1));
+    expectChangeLogInsert(
         configHost, clientHost.toString(), "removeShard", "", BSON("shard" << shardName));
 
     future.timed_get(kFutureTimeout);

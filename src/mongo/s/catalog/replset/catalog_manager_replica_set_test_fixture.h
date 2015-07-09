@@ -102,12 +102,21 @@ protected:
                      const NamespaceString& expectedNs,
                      const BSONObj& expectedQuery,
                      const StatusWith<long long>& response);
+    /**
+     * Wait for an operation, which creates the sharding change log collection and return the
+     * specified response.
+     */
+    void expectChangeLogCreate(const HostAndPort& configHost, const BSONObj& response);
 
-    void expectLogChange(const HostAndPort& configHost,
-                         const std::string& clientAddress,
-                         const std::string& what,
-                         const std::string& ns,
-                         const BSONObj& detail);
+    /**
+     * Wait for a single insert in the change log collection with the specified contents and return
+     * a successful response.
+     */
+    void expectChangeLogInsert(const HostAndPort& configHost,
+                               const std::string& clientAddress,
+                               const std::string& what,
+                               const std::string& ns,
+                               const BSONObj& detail);
 
     void setUp() override;
 

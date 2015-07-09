@@ -1752,14 +1752,14 @@ TEST_F(CatalogManagerReplSetTestFixture, createDatabaseDuplicateKeyOnInsert) {
 }
 
 TEST_F(CatalogManagerReplSetTestFixture, EnableShardingNoDBExists) {
+    configTargeter()->setFindHostReturnValue(HostAndPort("config:123"));
+
     vector<ShardType> shards;
     ShardType shard;
     shard.setName("shard0");
     shard.setHost("shard0:12");
 
     setupShards(vector<ShardType>{shard});
-
-    configTargeter()->setFindHostReturnValue(HostAndPort("config:123"));
 
     RemoteCommandTargeterMock* shardTargeter =
         RemoteCommandTargeterMock::get(shardRegistry()->getShard("shard0")->getTargeter());
@@ -1854,14 +1854,14 @@ TEST_F(CatalogManagerReplSetTestFixture, EnableShardingLockBusy) {
 }
 
 TEST_F(CatalogManagerReplSetTestFixture, EnableShardingDBExistsWithDifferentCase) {
+    configTargeter()->setFindHostReturnValue(HostAndPort("config:123"));
+
     vector<ShardType> shards;
     ShardType shard;
     shard.setName("shard0");
     shard.setHost("shard0:12");
 
     setupShards(vector<ShardType>{shard});
-
-    configTargeter()->setFindHostReturnValue(HostAndPort("config:123"));
 
     distLock()->expectLock(
         [](StringData, StringData, stdx::chrono::milliseconds, stdx::chrono::milliseconds) {},
@@ -1883,14 +1883,14 @@ TEST_F(CatalogManagerReplSetTestFixture, EnableShardingDBExistsWithDifferentCase
 }
 
 TEST_F(CatalogManagerReplSetTestFixture, EnableShardingDBExists) {
+    configTargeter()->setFindHostReturnValue(HostAndPort("config:123"));
+
     vector<ShardType> shards;
     ShardType shard;
     shard.setName("shard0");
     shard.setHost("shard0:12");
 
     setupShards(vector<ShardType>{shard});
-
-    configTargeter()->setFindHostReturnValue(HostAndPort("config:123"));
 
     distLock()->expectLock(
         [](StringData, StringData, stdx::chrono::milliseconds, stdx::chrono::milliseconds) {},
@@ -1938,14 +1938,14 @@ TEST_F(CatalogManagerReplSetTestFixture, EnableShardingDBExists) {
 }
 
 TEST_F(CatalogManagerReplSetTestFixture, EnableShardingDBExistsInvalidFormat) {
+    configTargeter()->setFindHostReturnValue(HostAndPort("config:123"));
+
     vector<ShardType> shards;
     ShardType shard;
     shard.setName("shard0");
     shard.setHost("shard0:12");
 
     setupShards(vector<ShardType>{shard});
-
-    configTargeter()->setFindHostReturnValue(HostAndPort("config:123"));
 
     distLock()->expectLock(
         [](StringData, StringData, stdx::chrono::milliseconds, stdx::chrono::milliseconds) {},
