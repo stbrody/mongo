@@ -3,30 +3,30 @@
  */
 var doTest = function() {
 
-var rsOpts = { oplogSize: 10, verbose : 2, useHostname : false };
-var st = new ShardingTest({ keyFile : 'jstests/libs/key1', shards : 2, chunksize : 2, config : 3,
-                            rs : rsOpts, other : { nopreallocj : 1, verbose : 2, useHostname : false }});
+var rsOpts = { oplogSize: 10, useHostname : false };
+var st = new ShardingTest({ keyFile : 'jstests/libs/key1', shards : 2, chunksize : 2,
+                            rs : rsOpts, other : { nopreallocj : 1, useHostname : false }});
 
 var mongos = st.s;
 var adminDB = mongos.getDB( 'admin' );
 var configDB = mongos.getDB( 'config' );
 var testDB = mongos.getDB( 'test' );
 
+jsTestLog('Setting up initial users');
+var rwUser = 'rwUser';
+var roUser = 'roUser';
+var password = 'password';
+var expectedDocs = 1000;
+
+adminDB.createUser({user: rwUser, pwd: password, roles: jsTest.adminUserRoles});
+
+assert( adminDB.auth( rwUser, password ) );
+
 // Secondaries should be up here, since we awaitReplication in the ShardingTest, but we *don't*
 // wait for the mongos to explicitly detect them.
 ReplSetTest.awaitRSClientHosts( mongos, st.rs0.getSecondaries(), { ok : true, secondary : true });
 ReplSetTest.awaitRSClientHosts( mongos, st.rs1.getSecondaries(), { ok : true, secondary : true });
 
-st.printShardingStatus();
-
-jsTestLog('Setting up initial users');
-var rwUser = 'rwUser';
-var roUser = 'roUser';
-var password = 'password';
-
-adminDB.createUser({user: rwUser, pwd: password, roles: jsTest.adminUserRoles});
-
-assert( adminDB.auth( rwUser, password ) );
 testDB.createUser({user: rwUser, pwd: password, roles: jsTest.basicUserRoles});
 testDB.createUser({user: roUser, pwd: password, roles: jsTest.readOnlyUserRoles});
 
@@ -48,6 +48,7 @@ st.rs1.getPrimary().getDB( 'admin' ).createUser({user: 'user',
 jsTestLog('Creating initial data');
 
 st.adminCommand( { enablesharding : "test" } );
+st.ensurePrimaryShard('test', 'test-rs0');
 st.adminCommand( { shardcollection : "test.foo" , key : { i : 1, j : 1 } } );
 
 // Stop the balancer, so no moveChunks will interfere with the splits we're testing
@@ -57,14 +58,16 @@ var str = 'a';
 while ( str.length < 8000 ) {
     str += str;
 }
+
+var bulk = testDB.foo.initializeUnorderedBulkOp();
 for ( var i = 0; i < 100; i++ ) {
     for ( var j = 0; j < 10; j++ ) {
-        testDB.foo.save({i:i, j:j, str:str});
+        bulk.insert({i:i, j:j, str:str});
     }
 }
-testDB.getLastError( 'majority' );
+assert.writeOK(bulk.execute({ w: "majority"}));
 
-assert.eq(1000, testDB.foo.count());
+assert.eq(expectedDocs, testDB.foo.count());
 
 // Wait for the balancer to start back up
 st.startBalancer()
@@ -112,8 +115,8 @@ var checkCommandFailed = function( db, cmdObj ) {
 var checkReadOps = function( hasReadAuth ) {
     if ( hasReadAuth ) {
         print( "Checking read operations, should work" );
-        assert.eq( 1000, testDB.foo.find().itcount() );
-        assert.eq( 1000, testDB.foo.count() );
+        assert.eq( expectedDocs, testDB.foo.find().itcount() );
+        assert.eq( expectedDocs, testDB.foo.count() );
         // NOTE: This is an explicit check that GLE can be run with read prefs, not the result of
         // above.
         assert.eq( null, testDB.runCommand({getlasterror : 1}).err );

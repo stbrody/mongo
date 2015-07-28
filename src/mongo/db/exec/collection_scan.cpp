@@ -1,5 +1,5 @@
 /**
- *    Copyright (C) 2013 10gen Inc.
+ *    Copyright (C) 2013-2014 MongoDB Inc.
  *
  *    This program is free software: you can redistribute it and/or  modify
  *    it under the terms of the GNU Affero General Public License, version 3,
@@ -26,128 +26,237 @@
  *    it in the license file.
  */
 
+#define MONGO_LOG_DEFAULT_COMPONENT ::mongo::logger::LogComponent::kQuery
+
 #include "mongo/db/exec/collection_scan.h"
 
 #include "mongo/db/catalog/database.h"
 #include "mongo/db/exec/collection_scan_common.h"
 #include "mongo/db/exec/filter.h"
+#include "mongo/db/exec/scoped_timer.h"
 #include "mongo/db/exec/working_set.h"
+#include "mongo/db/exec/working_set_common.h"
+#include "mongo/db/concurrency/write_conflict_exception.h"
 #include "mongo/db/catalog/collection.h"
-#include "mongo/db/structure/collection_iterator.h"
+#include "mongo/db/storage/record_fetcher.h"
+#include "mongo/stdx/memory.h"
+#include "mongo/util/fail_point_service.h"
+#include "mongo/util/log.h"
 
-#include "mongo/db/client.h" // XXX-ERH
-#include "mongo/db/pdfile.h" // XXX-ERH/ACM
+#include "mongo/db/client.h"  // XXX-ERH
 
 namespace mongo {
 
-    CollectionScan::CollectionScan(const CollectionScanParams& params,
-                                   WorkingSet* workingSet,
-                                   const MatchExpression* filter)
-        : _workingSet(workingSet),
-          _filter(filter),
-          _params(params),
-          _nsDropped(false) { }
+using std::unique_ptr;
+using std::vector;
+using stdx::make_unique;
 
-    PlanStage::StageState CollectionScan::work(WorkingSetID* out) {
-        ++_commonStats.works;
-        if (_nsDropped) { return PlanStage::DEAD; }
+// static
+const char* CollectionScan::kStageType = "COLLSCAN";
 
-        if (NULL == _iter) {
-            Collection* collection = cc().database()->getCollection( _params.ns );
-            if ( collection == NULL ) {
-                _nsDropped = true;
-                return PlanStage::DEAD;
-            }
+CollectionScan::CollectionScan(OperationContext* txn,
+                               const CollectionScanParams& params,
+                               WorkingSet* workingSet,
+                               const MatchExpression* filter)
+    : PlanStage(kStageType),
+      _txn(txn),
+      _workingSet(workingSet),
+      _filter(filter),
+      _params(params),
+      _isDead(false),
+      _wsidForFetch(_workingSet->allocate()) {
+    // Explain reports the direction of the collection scan.
+    _specificStats.direction = params.direction;
+}
 
-            _iter.reset( collection->getIterator( _params.start,
-                                                  _params.tailable,
-                                                  _params.direction ) );
+PlanStage::StageState CollectionScan::work(WorkingSetID* out) {
+    ++_commonStats.works;
 
-            ++_commonStats.needTime;
-            return PlanStage::NEED_TIME;
-        }
+    // Adds the amount of time taken by work() to executionTimeMillis.
+    ScopedTimer timer(&_commonStats.executionTimeMillis);
 
-        DiskLoc nextLoc;
+    if (_isDead) {
+        Status status(
+            ErrorCodes::CappedPositionLost,
+            str::stream()
+                << "CollectionScan died due to position in capped collection being deleted. "
+                << "Last seen record id: " << _lastSeenId);
+        *out = WorkingSetCommon::allocateStatusMember(_workingSet, status);
+        return PlanStage::DEAD;
+    }
 
-        // Should we try getNext() on the underlying _iter if we're EOF?  Yes, if we're tailable.
-        if (isEOF()) {
-            if (!_params.tailable) {
-                return PlanStage::IS_EOF;
-            }
-            else {
-                // See if _iter gives us anything new.
-                nextLoc = _iter->getNext();
-                if (nextLoc.isNull()) {
-                    // Nope, still EOF.
-                    return PlanStage::IS_EOF;
+    if ((0 != _params.maxScan) && (_specificStats.docsTested >= _params.maxScan)) {
+        _commonStats.isEOF = true;
+    }
+
+    if (_commonStats.isEOF) {
+        return PlanStage::IS_EOF;
+    }
+
+    boost::optional<Record> record;
+    const bool needToMakeCursor = !_cursor;
+    try {
+        if (needToMakeCursor) {
+            const bool forward = _params.direction == CollectionScanParams::FORWARD;
+            _cursor = _params.collection->getCursor(_txn, forward);
+
+            if (!_lastSeenId.isNull()) {
+                invariant(_params.tailable);
+                // Seek to where we were last time. If it no longer exists, mark us as dead
+                // since we want to signal an error rather than silently dropping data from the
+                // stream. This is related to the _lastSeenId handling in invalidate. Note that
+                // we want to return the record *after* this one since we have already returned
+                // this one. This is only possible in the tailing case because that is the only
+                // time we'd need to create a cursor after already getting a record out of it.
+                if (!_cursor->seekExact(_lastSeenId)) {
+                    _isDead = true;
+                    Status status(ErrorCodes::CappedPositionLost,
+                                  str::stream() << "CollectionScan died due to failure to restore "
+                                                << "tailable cursor position. "
+                                                << "Last seen record id: " << _lastSeenId);
+                    *out = WorkingSetCommon::allocateStatusMember(_workingSet, status);
+                    return PlanStage::DEAD;
                 }
             }
-        }
-        else {
-            nextLoc = _iter->getNext();
-        }
 
-        WorkingSetID id = _workingSet->allocate();
-        WorkingSetMember* member = _workingSet->get(id);
-        member->loc = nextLoc;
-        member->obj = member->loc.obj();
-        member->state = WorkingSetMember::LOC_AND_UNOWNED_OBJ;
-
-        ++_specificStats.docsTested;
-
-        if (Filter::passes(member, _filter)) {
-            *out = id;
-            ++_commonStats.advanced;
-            return PlanStage::ADVANCED;
-        }
-        else {
-            _workingSet->free(id);
-            ++_commonStats.needTime;
+            _commonStats.needTime++;
             return PlanStage::NEED_TIME;
         }
-    }
 
-    bool CollectionScan::isEOF() {
-        if ((0 != _params.maxScan) && (_specificStats.docsTested >= _params.maxScan)) {
-            return true;
-        }
-        if (_nsDropped) { return true; }
-        if (NULL == _iter) { return false; }
-        return _iter->isEOF();
-    }
-
-    void CollectionScan::invalidate(const DiskLoc& dl, InvalidationType type) {
-        ++_commonStats.invalidates;
-
-        // We don't care about mutations since we apply any filters to the result when we (possibly)
-        // return it.  Deletions can harm the underlying CollectionIterator so we pass them down.
-        if (NULL != _iter && (INVALIDATION_DELETION == type)) {
-            _iter->invalidate(dl);
-        }
-    }
-
-    void CollectionScan::prepareToYield() {
-        ++_commonStats.yields;
-        if (NULL != _iter) {
-            _iter->prepareToYield();
-        }
-    }
-
-    void CollectionScan::recoverFromYield() {
-        ++_commonStats.unyields;
-        if (NULL != _iter) {
-            if (!_iter->recoverFromYield()) {
-                warning() << "collection dropped during yield of collscan or state deleted";
-                _nsDropped = true;
+        if (_lastSeenId.isNull() && !_params.start.isNull()) {
+            record = _cursor->seekExact(_params.start);
+        } else {
+            // See if the record we're about to access is in memory. If not, pass a fetch
+            // request up.
+            if (auto fetcher = _cursor->fetcherForNext()) {
+                // Pass the RecordFetcher up.
+                WorkingSetMember* member = _workingSet->get(_wsidForFetch);
+                member->setFetcher(fetcher.release());
+                *out = _wsidForFetch;
+                _commonStats.needYield++;
+                return PlanStage::NEED_YIELD;
             }
+
+            record = _cursor->next();
         }
+    } catch (const WriteConflictException& wce) {
+        // Leave us in a state to try again next time.
+        if (needToMakeCursor)
+            _cursor.reset();
+        *out = WorkingSet::INVALID_ID;
+        return PlanStage::NEED_YIELD;
     }
 
-    PlanStageStats* CollectionScan::getStats() {
-        _commonStats.isEOF = isEOF();
-        auto_ptr<PlanStageStats> ret(new PlanStageStats(_commonStats, STAGE_COLLSCAN));
-        ret->specific.reset(new CollectionScanStats(_specificStats));
-        return ret.release();
+    if (!record) {
+        // We just hit EOF. If we are tailable and have already returned data, leave us in a
+        // state to pick up where we left off on the next call to work(). Otherwise EOF is
+        // permanent.
+        if (_params.tailable && !_lastSeenId.isNull()) {
+            _cursor.reset();
+        } else {
+            _commonStats.isEOF = true;
+        }
+
+        return PlanStage::IS_EOF;
     }
+
+    _lastSeenId = record->id;
+
+    WorkingSetID id = _workingSet->allocate();
+    WorkingSetMember* member = _workingSet->get(id);
+    member->loc = record->id;
+    member->obj = {_txn->recoveryUnit()->getSnapshotId(), record->data.releaseToBson()};
+    _workingSet->transitionToLocAndObj(id);
+
+    return returnIfMatches(member, id, out);
+}
+
+PlanStage::StageState CollectionScan::returnIfMatches(WorkingSetMember* member,
+                                                      WorkingSetID memberID,
+                                                      WorkingSetID* out) {
+    ++_specificStats.docsTested;
+
+    if (Filter::passes(member, _filter)) {
+        *out = memberID;
+        ++_commonStats.advanced;
+        return PlanStage::ADVANCED;
+    } else {
+        _workingSet->free(memberID);
+        ++_commonStats.needTime;
+        return PlanStage::NEED_TIME;
+    }
+}
+
+bool CollectionScan::isEOF() {
+    return _commonStats.isEOF || _isDead;
+}
+
+void CollectionScan::doInvalidate(OperationContext* txn,
+                                  const RecordId& id,
+                                  InvalidationType type) {
+    // We don't care about mutations since we apply any filters to the result when we (possibly)
+    // return it.
+    if (INVALIDATION_DELETION != type) {
+        return;
+    }
+
+    // If we're here, 'id' is being deleted.
+
+    // Deletions can harm the underlying RecordCursor so we must pass them down.
+    if (_cursor) {
+        _cursor->invalidate(id);
+    }
+
+    if (_params.tailable && id == _lastSeenId) {
+        // This means that deletes have caught up to the reader. We want to error in this case
+        // so readers don't miss potentially important data.
+        _isDead = true;
+    }
+}
+
+void CollectionScan::doSaveState() {
+    if (_cursor) {
+        _cursor->savePositioned();
+    }
+}
+
+void CollectionScan::doRestoreState() {
+    if (_cursor) {
+        if (!_cursor->restore()) {
+            warning() << "Could not restore RecordCursor for CollectionScan: " << _txn->getNS();
+            _isDead = true;
+        }
+    }
+}
+
+void CollectionScan::doDetachFromOperationContext() {
+    _txn = NULL;
+    if (_cursor)
+        _cursor->detachFromOperationContext();
+}
+
+void CollectionScan::doReattachToOperationContext(OperationContext* opCtx) {
+    invariant(_txn == NULL);
+    _txn = opCtx;
+    if (_cursor)
+        _cursor->reattachToOperationContext(opCtx);
+}
+
+unique_ptr<PlanStageStats> CollectionScan::getStats() {
+    // Add a BSON representation of the filter to the stats tree, if there is one.
+    if (NULL != _filter) {
+        BSONObjBuilder bob;
+        _filter->toBSON(&bob);
+        _commonStats.filter = bob.obj();
+    }
+
+    unique_ptr<PlanStageStats> ret = make_unique<PlanStageStats>(_commonStats, STAGE_COLLSCAN);
+    ret->specific = make_unique<CollectionScanStats>(_specificStats);
+    return ret;
+}
+
+const SpecificStats* CollectionScan::getSpecificStats() const {
+    return &_specificStats;
+}
 
 }  // namespace mongo

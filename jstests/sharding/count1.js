@@ -35,6 +35,7 @@ assert.eq( 1 , db.bar.find( { n : 1 } ).count() , "bar 2" );
 
 // part 1
 s.adminCommand( { enablesharding : "test" } )
+s.ensurePrimaryShard('test', 'shard0001');
 s.adminCommand( { shardcollection : "test.foo" , key : { name : 1 } } );
 
 primary = s.getServer( "test" ).getDB( "test" );
@@ -52,9 +53,9 @@ db.foo.save( { _id : 6 , name : "allan" } )
 assert.eq( 6 , db.foo.find().count() , "basic count" );
 
 // part 2
-s.adminCommand( { split : "test.foo" , find : { name : "joe" } } ); // [Minkey -> allan) , * [allan -> ..)
-s.adminCommand( { split : "test.foo" , find : { name : "joe" } } ); // * [allan -> sara) , [sara -> Maxkey)
-s.adminCommand( { split : "test.foo" , find : { name : "joe" } } ); // [alan -> eliot) , [eliot -> sara]
+s.adminCommand({ split: "test.foo", middle: { name: "allan" }});
+s.adminCommand({ split: "test.foo", middle: { name: "sara" }});
+s.adminCommand({ split: "test.foo", middle: { name: "eliot" }});
 
 // MINKEY->allan,bob->eliot,joe,mark->sara,MAXKEY
 

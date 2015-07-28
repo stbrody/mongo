@@ -34,26 +34,36 @@
 
 namespace mongo {
 
-    namespace optionenvironment {
-        class OptionSection;
-        class Environment;
-    } // namespace optionenvironment
+namespace optionenvironment {
+class OptionSection;
+class Environment;
+}  // namespace optionenvironment
 
-    namespace moe = mongo::optionenvironment;
+namespace moe = mongo::optionenvironment;
 
-    Status addGeneralServerOptions(moe::OptionSection* options);
+Status addGeneralServerOptions(moe::OptionSection* options);
 
-    Status addWindowsServerOptions(moe::OptionSection* options);
+Status addWindowsServerOptions(moe::OptionSection* options);
 
-    Status addSSLServerOptions(moe::OptionSection* options);
+Status addSSLServerOptions(moe::OptionSection* options);
 
-    Status storeServerOptions(const moe::Environment& params,
-                              const std::vector<std::string>& args);
+/**
+ * Handle custom validation of server options that can not currently be done by using
+ * Constraints in the Environment.  See the "validate" function in the Environment class for
+ * more details.
+ */
+Status validateServerOptions(const moe::Environment& params);
 
-    void printCommandLineOpts();
+/**
+ * Canonicalize server options for the given environment.
+ *
+ * For example, the options "objcheck", "noobjcheck", and "net.wireObjectCheck" should all be
+ * merged into "net.wireObjectCheck".
+ */
+Status canonicalizeServerOptions(moe::Environment* params);
 
-    // This function should eventually go away, but needs to be here now because we have a lot of
-    // code that is shared between mongod and mongos that must know at runtime which binary it is in
-    bool isMongos();
+Status storeServerOptions(const moe::Environment& params, const std::vector<std::string>& args);
 
-} // namespace mongo
+void printCommandLineOpts();
+
+}  // namespace mongo

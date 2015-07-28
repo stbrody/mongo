@@ -1,10 +1,11 @@
 // test to make sure that tag ranges get split
 
-s = new ShardingTest( "tag_auto_split", 2, 0, 1, { nopreallocj : true } );
+s = new ShardingTest( "tag_auto_split", 2, 0, 1, { nopreallocj : true, enableBalancer : true } );
 
 db = s.getDB( "test" );
 
 s.adminCommand( { enablesharding : "test" } )
+s.ensurePrimaryShard('test', 'shard0001');
 s.adminCommand( { shardcollection : "test.foo" , key : { _id : 1 } } );
 
 assert.eq( 1, s.config.chunks.count() );
@@ -24,11 +25,12 @@ printjson( sh.status() );
 s.stop();
 
 //test without full shard key on tags
-s = new ShardingTest( "tag_auto_split2", 2, 0, 1, { nopreallocj : true } );
+s = new ShardingTest( "tag_auto_split2", 2, 0, 1, { nopreallocj : true, enableBalancer : true } );
 
 db = s.getDB( "test" );
 
 s.adminCommand( { enablesharding : "test" } )
+s.ensurePrimaryShard('test', 'shard0001');
 s.adminCommand( { shardcollection : "test.foo" , key : { _id : 1, a : 1 } } );
 
 assert.eq( 1, s.config.chunks.count() );

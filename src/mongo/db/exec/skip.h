@@ -28,41 +28,45 @@
 
 #pragma once
 
-#include "mongo/db/diskloc.h"
-#include "mongo/db/jsobj.h"
+
 #include "mongo/db/exec/plan_stage.h"
+#include "mongo/db/jsobj.h"
+#include "mongo/db/record_id.h"
 
 namespace mongo {
 
-    /**
-     * This stage implements skip functionality.  It drops the first 'toSkip' results from its child
-     * then returns the rest verbatim.
-     *
-     * Preconditions: None.
-     */
-    class SkipStage : public PlanStage {
-    public:
-        SkipStage(int toSkip, WorkingSet* ws, PlanStage* child);
-        virtual ~SkipStage();
+/**
+ * This stage implements skip functionality.  It drops the first 'toSkip' results from its child
+ * then returns the rest verbatim.
+ *
+ * Preconditions: None.
+ */
+class SkipStage : public PlanStage {
+public:
+    SkipStage(long long toSkip, WorkingSet* ws, PlanStage* child);
+    virtual ~SkipStage();
 
-        virtual bool isEOF();
-        virtual StageState work(WorkingSetID* out);
+    virtual bool isEOF();
+    virtual StageState work(WorkingSetID* out);
 
-        virtual void prepareToYield();
-        virtual void recoverFromYield();
-        virtual void invalidate(const DiskLoc& dl, InvalidationType type);
+    virtual StageType stageType() const {
+        return STAGE_SKIP;
+    }
 
-        virtual PlanStageStats* getStats();
+    virtual std::unique_ptr<PlanStageStats> getStats();
 
-    private:
-        WorkingSet* _ws;
-        scoped_ptr<PlanStage> _child;
+    virtual const SpecificStats* getSpecificStats() const;
 
-        // We drop the first _toSkip results that we would have returned.
-        int _toSkip;
+    static const char* kStageType;
 
-        // Stats
-        CommonStats _commonStats;
-    };
+private:
+    WorkingSet* _ws;
+
+    // We drop the first _toSkip results that we would have returned.
+    long long _toSkip;
+
+    // Stats
+    SkipStats _specificStats;
+};
 
 }  // namespace mongo

@@ -26,1093 +26,1340 @@
  *    it in the license file.
  */
 
+#define MONGO_LOG_DEFAULT_COMPONENT ::mongo::logger::LogComponent::kWrite
+
+#include "mongo/platform/basic.h"
+
 #include "mongo/db/commands/write_commands/batch_executor.h"
 
 #include <memory>
 
 #include "mongo/base/error_codes.h"
+#include "mongo/db/catalog/database.h"
+#include "mongo/db/catalog/database_holder.h"
+#include "mongo/db/catalog/document_validation.h"
+#include "mongo/db/catalog/index_create.h"
+#include "mongo/db/clientcursor.h"
 #include "mongo/db/commands.h"
+#include "mongo/db/concurrency/write_conflict_exception.h"
+#include "mongo/db/curop_metrics.h"
+#include "mongo/db/db_raii.h"
+#include "mongo/db/exec/delete.h"
+#include "mongo/db/exec/update.h"
 #include "mongo/db/instance.h"
 #include "mongo/db/introspect.h"
 #include "mongo/db/lasterror.h"
-#include "mongo/db/ops/delete.h"
+#include "mongo/db/namespace_string.h"
+#include "mongo/db/op_observer.h"
+#include "mongo/db/operation_context_impl.h"
+#include "mongo/db/ops/delete_request.h"
 #include "mongo/db/ops/insert.h"
-#include "mongo/db/ops/update.h"
+#include "mongo/db/ops/parsed_delete.h"
+#include "mongo/db/ops/parsed_update.h"
 #include "mongo/db/ops/update_lifecycle_impl.h"
-#include "mongo/db/pagefault.h"
+#include "mongo/db/query/get_executor.h"
+#include "mongo/db/query/plan_executor.h"
+#include "mongo/db/query/query_knobs.h"
 #include "mongo/db/repl/oplog.h"
-#include "mongo/db/repl/replication_server_status.h"
-#include "mongo/db/repl/rs.h"
+#include "mongo/db/repl/repl_client_info.h"
+#include "mongo/db/repl/repl_settings.h"
+#include "mongo/db/repl/replication_coordinator_global.h"
 #include "mongo/db/server_parameters.h"
+#include "mongo/db/s/collection_metadata.h"
+#include "mongo/db/s/sharded_connection_info.h"
+#include "mongo/db/s/sharding_state.h"
 #include "mongo/db/stats/counters.h"
+#include "mongo/db/stats/top.h"
 #include "mongo/db/write_concern.h"
-#include "mongo/s/collection_metadata.h"
-#include "mongo/s/d_logic.h"
 #include "mongo/s/shard_key_pattern.h"
-#include "mongo/s/write_ops/write_error_detail.h"
+#include "mongo/s/stale_exception.h"
 #include "mongo/s/write_ops/batched_upsert_detail.h"
+#include "mongo/s/write_ops/write_error_detail.h"
+#include "mongo/stdx/memory.h"
+#include "mongo/stdx/mutex.h"
+#include "mongo/util/elapsed_tracker.h"
+#include "mongo/util/log.h"
 #include "mongo/util/mongoutils/str.h"
 
 namespace mongo {
 
-    // TODO: Determine queueing behavior we want here
-    MONGO_EXPORT_SERVER_PARAMETER( queueForMigrationCommit, bool, true );
+using std::endl;
+using std::string;
+using std::unique_ptr;
+using std::vector;
 
-    using mongoutils::str::stream;
+namespace {
 
-    WriteBatchExecutor::WriteBatchExecutor( const BSONObj& wc,
-                                            Client* client,
-                                            OpCounters* opCounters,
-                                            LastError* le ) :
-        _defaultWriteConcern( wc ),
-        _client( client ),
-        _opCounters( opCounters ),
-        _le( le ),
-        _stats( new WriteBatchStats ) {
+/**
+ * Data structure to safely hold and clean up results of single write operations.
+ */
+class WriteOpResult {
+    MONGO_DISALLOW_COPYING(WriteOpResult);
+
+public:
+    WriteOpResult() {}
+
+    WriteOpStats& getStats() {
+        return _stats;
     }
 
-    static WCErrorDetail* toWriteConcernError( const Status& wcStatus,
-                                               const WriteConcernResult& wcResult ) {
-
-        WCErrorDetail* wcError = new WCErrorDetail;
-
-        wcError->setErrCode( wcStatus.code() );
-        wcError->setErrMessage( wcStatus.reason() );
-        if ( wcResult.wTimedOut )
-            wcError->setErrInfo( BSON( "wtimeout" << true ) );
-
-        return wcError;
+    WriteErrorDetail* getError() {
+        return _error.get();
+    }
+    WriteErrorDetail* releaseError() {
+        return _error.release();
+    }
+    void setError(WriteErrorDetail* error) {
+        _error.reset(error);
     }
 
-    static WriteErrorDetail* toWriteError( const Status& status ) {
+private:
+    WriteOpStats _stats;
+    std::unique_ptr<WriteErrorDetail> _error;
+};
 
-        WriteErrorDetail* error = new WriteErrorDetail;
+}  // namespace
 
-        // TODO: Complex transform here?
-        error->setErrCode( status.code() );
-        error->setErrMessage( status.reason() );
+// TODO: Determine queueing behavior we want here
+MONGO_EXPORT_SERVER_PARAMETER(queueForMigrationCommit, bool, true);
 
-        return error;
+using mongoutils::str::stream;
+
+WriteBatchExecutor::WriteBatchExecutor(OperationContext* txn, OpCounters* opCounters, LastError* le)
+    : _txn(txn), _opCounters(opCounters), _le(le), _stats(new WriteBatchStats) {}
+
+static WCErrorDetail* toWriteConcernError(const Status& wcStatus,
+                                          const WriteConcernResult& wcResult) {
+    WCErrorDetail* wcError = new WCErrorDetail;
+
+    wcError->setErrCode(wcStatus.code());
+    wcError->setErrMessage(wcStatus.reason());
+    if (wcResult.wTimedOut)
+        wcError->setErrInfo(BSON("wtimeout" << true));
+
+    return wcError;
+}
+
+static WriteErrorDetail* toWriteError(const Status& status) {
+    WriteErrorDetail* error = new WriteErrorDetail;
+
+    // TODO: Complex transform here?
+    error->setErrCode(status.code());
+    error->setErrMessage(status.reason());
+
+    return error;
+}
+
+static void toBatchError(const Status& status, BatchedCommandResponse* response) {
+    response->clear();
+    response->setErrCode(status.code());
+    response->setErrMessage(status.reason());
+    response->setOk(false);
+    dassert(response->isValid(NULL));
+}
+
+static void noteInCriticalSection(WriteErrorDetail* staleError) {
+    BSONObjBuilder builder;
+    if (staleError->isErrInfoSet())
+        builder.appendElements(staleError->getErrInfo());
+    builder.append("inCriticalSection", true);
+    staleError->setErrInfo(builder.obj());
+}
+
+// static
+Status WriteBatchExecutor::validateBatch(const BatchedCommandRequest& request) {
+    // Validate namespace
+    const NamespaceString& nss = request.getNS();
+    if (!nss.isValid()) {
+        return Status(ErrorCodes::InvalidNamespace, nss.ns() + " is not a valid namespace");
     }
 
-    static void noteInCriticalSection( WriteErrorDetail* staleError ) {
-        BSONObjBuilder builder;
-        if ( staleError->isErrInfoSet() )
-            builder.appendElements( staleError->getErrInfo() );
-        builder.append( "inCriticalSection", true );
-        staleError->setErrInfo( builder.obj() );
+    // Make sure we can write to the namespace
+    Status allowedStatus = userAllowedWriteNS(nss);
+    if (!allowedStatus.isOK()) {
+        return allowedStatus;
     }
 
-    void WriteBatchExecutor::executeBatch( const BatchedCommandRequest& request,
-                                           BatchedCommandResponse* response ) {
+    // Validate insert index requests
+    // TODO: Push insert index requests through createIndex once all upgrade paths support it
+    string errMsg;
+    if (request.isInsertIndexRequest() && !request.isValidIndexRequest(&errMsg)) {
+        return Status(ErrorCodes::InvalidOptions, errMsg);
+    }
 
-        // TODO: Lift write concern parsing out of this entirely.
-        WriteConcernOptions writeConcern;
-        Status status = Status::OK();
+    return Status::OK();
+}
 
-        BSONObj wcDoc;
-        if ( request.isWriteConcernSet() ) {
-            wcDoc = request.getWriteConcern();
+void WriteBatchExecutor::executeBatch(const BatchedCommandRequest& request,
+                                      BatchedCommandResponse* response) {
+    // Validate namespace
+    Status isValid = validateBatch(request);
+    if (!isValid.isOK()) {
+        toBatchError(isValid, response);
+        return;
+    }
+
+    if (request.sizeWriteOps() == 0u) {
+        toBatchError(Status(ErrorCodes::InvalidLength, "no write ops were included in the batch"),
+                     response);
+        return;
+    }
+
+    // Validate batch size
+    if (request.sizeWriteOps() > BatchedCommandRequest::kMaxWriteBatchSize) {
+        toBatchError(Status(ErrorCodes::InvalidLength,
+                            stream() << "exceeded maximum write batch size of "
+                                     << BatchedCommandRequest::kMaxWriteBatchSize),
+                     response);
+        return;
+    }
+
+    //
+    // End validation
+    //
+
+    const WriteConcernOptions& writeConcern = _txn->getWriteConcern();
+    bool silentWC = writeConcern.wMode.empty() && writeConcern.wNumNodes == 0 &&
+        writeConcern.syncMode == WriteConcernOptions::NONE;
+
+    Timer commandTimer;
+
+    OwnedPointerVector<WriteErrorDetail> writeErrorsOwned;
+    vector<WriteErrorDetail*>& writeErrors = writeErrorsOwned.mutableVector();
+
+    OwnedPointerVector<BatchedUpsertDetail> upsertedOwned;
+    vector<BatchedUpsertDetail*>& upserted = upsertedOwned.mutableVector();
+
+    //
+    // Apply each batch item, possibly bulking some items together in the write lock.
+    // Stops on error if batch is ordered.
+    //
+
+    bulkExecute(request, &upserted, &writeErrors);
+
+    //
+    // Try to enforce the write concern if everything succeeded (unordered or ordered)
+    // OR if something succeeded and we're unordered.
+    //
+
+    unique_ptr<WCErrorDetail> wcError;
+    bool needToEnforceWC = writeErrors.empty() ||
+        (!request.getOrdered() && writeErrors.size() < request.sizeWriteOps());
+
+    if (needToEnforceWC) {
+        {
+            stdx::lock_guard<Client> lk(*_txn->getClient());
+            CurOp::get(_txn)->setMessage_inlock("waiting for write concern");
         }
 
-        if ( wcDoc.isEmpty() ) {
-            status = writeConcern.parse( _defaultWriteConcern );
+        WriteConcernResult res;
+        Status status = waitForWriteConcern(
+            _txn, repl::ReplClientInfo::forClient(_txn->getClient()).getLastOp(), &res);
+
+        if (!status.isOK()) {
+            wcError.reset(toWriteConcernError(status, res));
         }
-        else {
-            status = writeConcern.parse( wcDoc );
-        }
+    }
 
-        if ( status.isOK() ) {
-            status = validateWriteConcern( writeConcern );
-        }
+    //
+    // Refresh metadata if needed
+    //
 
-        if ( !status.isOK() ) {
-            response->setErrCode( status.code() );
-            response->setErrMessage( status.reason() );
-            response->setOk( false );
-            dassert( response->isValid(NULL) );
-            return;
-        }
+    bool staleBatch =
+        !writeErrors.empty() && writeErrors.back()->getErrCode() == ErrorCodes::StaleShardVersion;
 
-        bool silentWC = writeConcern.wMode.empty() && writeConcern.wNumNodes == 0
-                        && writeConcern.syncMode == WriteConcernOptions::NONE;
+    if (staleBatch) {
+        const BatchedRequestMetadata* requestMetadata = request.getMetadata();
+        dassert(requestMetadata);
 
-        Timer commandTimer;
+        // Make sure our shard name is set or is the same as what was set previously
+        if (ShardingState::get(getGlobalServiceContext())
+                ->setShardName(requestMetadata->getShardName())) {
+            //
+            // First, we refresh metadata if we need to based on the requested version.
+            //
 
-        OwnedPointerVector<WriteErrorDetail> writeErrorsOwned;
-        vector<WriteErrorDetail*>& writeErrors = writeErrorsOwned.mutableVector();
+            ChunkVersion latestShardVersion;
+            ShardingState::get(getGlobalServiceContext())
+                ->refreshMetadataIfNeeded(_txn,
+                                          request.getTargetingNS(),
+                                          requestMetadata->getShardVersion(),
+                                          &latestShardVersion);
 
-        OwnedPointerVector<BatchedUpsertDetail> upsertedOwned;
-        vector<BatchedUpsertDetail*>& upserted = upsertedOwned.mutableVector();
-
-        //
-        // Apply each batch item, possibly bulking some items together in the write lock.
-        // Stops on error if batch is ordered.
-        //
-
-        bulkExecute( request, &upserted, &writeErrors );
-
-        //
-        // Try to enforce the write concern if everything succeeded (unordered or ordered)
-        // OR if something succeeded and we're unordered.
-        //
-
-        auto_ptr<WCErrorDetail> wcError;
-        bool needToEnforceWC = writeErrors.empty()
-                               || ( !request.getOrdered()
-                                    && writeErrors.size() < request.sizeWriteOps() );
-
-        if ( needToEnforceWC ) {
-
-            _client->curop()->setMessage( "waiting for write concern" );
-
-            WriteConcernResult res;
-            status = waitForWriteConcern( writeConcern, _client->getLastOp(), &res );
-
-            if ( !status.isOK() ) {
-                wcError.reset( toWriteConcernError( status, res ) );
+            // Report if we're still changing our metadata
+            // TODO: Better reporting per-collection
+            if (ShardingState::get(getGlobalServiceContext())->inCriticalMigrateSection()) {
+                noteInCriticalSection(writeErrors.back());
             }
-        }
 
-        //
-        // Refresh metadata if needed
-        //
-
-        bool staleBatch = !writeErrors.empty()
-                          && writeErrors.back()->getErrCode() == ErrorCodes::StaleShardVersion;
-
-        if ( staleBatch ) {
-
-            const BatchedRequestMetadata* requestMetadata = request.getMetadata();
-            dassert( requestMetadata );
-
-            // Make sure our shard name is set or is the same as what was set previously
-            if ( shardingState.setShardName( requestMetadata->getShardName() ) ) {
-
+            if (queueForMigrationCommit) {
                 //
-                // First, we refresh metadata if we need to based on the requested version.
+                // Queue up for migration to end - this allows us to be sure that clients will
+                // not repeatedly try to refresh metadata that is not yet written to the config
+                // server.  Not necessary for correctness.
+                // Exposed as optional parameter to allow testing of queuing behavior with
+                // different network timings.
                 //
 
-                ChunkVersion latestShardVersion;
-                shardingState.refreshMetadataIfNeeded( request.getTargetingNS(),
-                                                       requestMetadata->getShardVersion(),
-                                                       &latestShardVersion );
+                const ChunkVersion& requestShardVersion = requestMetadata->getShardVersion();
 
-                // Report if we're still changing our metadata
-                // TODO: Better reporting per-collection
-                if ( shardingState.inCriticalMigrateSection() ) {
-                    noteInCriticalSection( writeErrors.back() );
-                }
+                //
+                // Only wait if we're an older version (in the current collection epoch) and
+                // we're not write compatible, implying that the current migration is affecting
+                // writes.
+                //
 
-                if ( queueForMigrationCommit ) {
+                if (requestShardVersion.isOlderThan(latestShardVersion) &&
+                    !requestShardVersion.isWriteCompatibleWith(latestShardVersion)) {
+                    while (
+                        ShardingState::get(getGlobalServiceContext())->inCriticalMigrateSection()) {
+                        log() << "write request to old shard version "
+                              << requestMetadata->getShardVersion().toString()
+                              << " waiting for migration commit" << endl;
 
-                    //
-                    // Queue up for migration to end - this allows us to be sure that clients will
-                    // not repeatedly try to refresh metadata that is not yet written to the config
-                    // server.  Not necessary for correctness.
-                    // Exposed as optional parameter to allow testing of queuing behavior with
-                    // different network timings.
-                    //
-
-                    const ChunkVersion& requestShardVersion = requestMetadata->getShardVersion();
-
-                    //
-                    // Only wait if we're an older version (in the current collection epoch) and
-                    // we're not write compatible, implying that the current migration is affecting
-                    // writes.
-                    //
-
-                    if ( requestShardVersion.isOlderThan( latestShardVersion ) &&
-                         !requestShardVersion.isWriteCompatibleWith( latestShardVersion ) ) {
-
-                        while ( shardingState.inCriticalMigrateSection() ) {
-
-                            log() << "write request to old shard version "
-                                  << requestMetadata->getShardVersion().toString()
-                                  << " waiting for migration commit" << endl;
-
-                            shardingState.waitTillNotInCriticalSection( 10 /* secs */);
-                        }
+                        ShardingState::get(getGlobalServiceContext())
+                            ->waitTillNotInCriticalSection(10 /* secs */);
                     }
                 }
             }
-            else {
-                // If our shard name is stale, our version must have been stale as well
-                dassert( writeErrors.size() == request.sizeWriteOps() );
-            }
+        } else {
+            // If our shard name is stale, our version must have been stale as well
+            dassert(writeErrors.size() == request.sizeWriteOps());
         }
-
-        //
-        // Construct response
-        //
-
-        response->setOk( true );
-
-        if ( !silentWC ) {
-
-            if ( upserted.size() ) {
-                response->setUpsertDetails( upserted );
-                upserted.clear();
-            }
-
-            if ( writeErrors.size() ) {
-                response->setErrDetails( writeErrors );
-                writeErrors.clear();
-            }
-
-            if ( wcError.get() ) {
-                response->setWriteConcernError( wcError.release() );
-            }
-
-            if ( anyReplEnabled() ) {
-                response->setLastOp( _client->getLastOp() );
-                if (theReplSet) {
-                    response->setElectionId( theReplSet->getElectionId() );
-                }
-            }
-
-            // Set the stats for the response
-            response->setN( _stats->numInserted + _stats->numUpserted + _stats->numMatched
-                            + _stats->numDeleted );
-            if ( request.getBatchType() == BatchedCommandRequest::BatchType_Update )
-                response->setNModified( _stats->numModified );
-        }
-
-        dassert( response->isValid( NULL ) );
     }
 
-    // Translates write item type to wire protocol op code.
-    // Helper for WriteBatchExecutor::applyWriteItem().
-    static int getOpCode( BatchedCommandRequest::BatchType writeType ) {
-        switch ( writeType ) {
+    //
+    // Construct response
+    //
+
+    response->setOk(true);
+
+    if (!silentWC) {
+        if (upserted.size()) {
+            response->setUpsertDetails(upserted);
+        }
+
+        if (writeErrors.size()) {
+            response->setErrDetails(writeErrors);
+        }
+
+        if (wcError.get()) {
+            response->setWriteConcernError(wcError.release());
+        }
+
+        repl::ReplicationCoordinator* replCoord = repl::getGlobalReplicationCoordinator();
+        const repl::ReplicationCoordinator::Mode replMode = replCoord->getReplicationMode();
+        if (replMode != repl::ReplicationCoordinator::modeNone) {
+            response->setLastOp(
+                repl::ReplClientInfo::forClient(_txn->getClient()).getLastOp().getTimestamp());
+            if (replMode == repl::ReplicationCoordinator::modeReplSet) {
+                response->setElectionId(replCoord->getElectionId());
+            }
+        }
+
+        // Set the stats for the response
+        response->setN(_stats->numInserted + _stats->numUpserted + _stats->numMatched +
+                       _stats->numDeleted);
+        if (request.getBatchType() == BatchedCommandRequest::BatchType_Update)
+            response->setNModified(_stats->numModified);
+    }
+
+    dassert(response->isValid(NULL));
+}
+
+// Translates write item type to wire protocol op code.
+// Helper for WriteBatchExecutor::applyWriteItem().
+static int getOpCode(const BatchItemRef& currWrite) {
+    switch (currWrite.getRequest()->getBatchType()) {
         case BatchedCommandRequest::BatchType_Insert:
             return dbInsert;
         case BatchedCommandRequest::BatchType_Update:
             return dbUpdate;
-        default:
-            dassert( writeType == BatchedCommandRequest::BatchType_Delete );
+        case BatchedCommandRequest::BatchType_Delete:
             return dbDelete;
-        }
-        return 0;
+        default:
+            MONGO_UNREACHABLE;
     }
+}
 
-    static void buildStaleError( const ChunkVersion& shardVersionRecvd,
-                                 const ChunkVersion& shardVersionWanted,
-                                 WriteErrorDetail* error ) {
+static void buildStaleError(const ChunkVersion& shardVersionRecvd,
+                            const ChunkVersion& shardVersionWanted,
+                            WriteErrorDetail* error) {
+    // Write stale error to results
+    error->setErrCode(ErrorCodes::StaleShardVersion);
 
-        // Write stale error to results
-        error->setErrCode( ErrorCodes::StaleShardVersion );
+    BSONObjBuilder infoB;
+    shardVersionWanted.addToBSON(infoB, "vWanted");
+    error->setErrInfo(infoB.obj());
 
-        BSONObjBuilder infoB;
-        shardVersionWanted.addToBSON( infoB, "vWanted" );
-        error->setErrInfo( infoB.obj() );
+    string errMsg = stream() << "stale shard version detected before write, received "
+                             << shardVersionRecvd.toString() << " but local version is "
+                             << shardVersionWanted.toString();
+    error->setErrMessage(errMsg);
+}
 
-        string errMsg = stream() << "stale shard version detected before write, received "
-                                 << shardVersionRecvd.toString() << " but local version is "
-                                 << shardVersionWanted.toString();
-        error->setErrMessage( errMsg );
-    }
+static bool checkShardVersion(OperationContext* txn,
+                              const BatchedCommandRequest& request,
+                              WriteOpResult* result) {
+    const NamespaceString& nss = request.getTargetingNSS();
+    dassert(txn->lockState()->isCollectionLockedForMode(nss.ns(), MODE_IX));
 
-    static bool checkShardVersion( ShardingState* shardingState,
-                                   const BatchedCommandRequest& request,
-                                   WriteErrorDetail** error ) {
+    ChunkVersion requestShardVersion =
+        request.isMetadataSet() && request.getMetadata()->isShardVersionSet()
+        ? request.getMetadata()->getShardVersion()
+        : ChunkVersion::IGNORED();
 
-        const NamespaceString nss( request.getTargetingNS() );
-        Lock::assertWriteLocked( nss.ns() );
+    ShardingState* shardingState = ShardingState::get(getGlobalServiceContext());
+    if (shardingState->enabled()) {
+        CollectionMetadataPtr metadata = shardingState->getCollectionMetadata(nss.ns());
 
-        ChunkVersion requestShardVersion =
-            request.isMetadataSet() && request.getMetadata()->isShardVersionSet() ?
-                request.getMetadata()->getShardVersion() : ChunkVersion::IGNORED();
+        if (!ChunkVersion::isIgnoredVersion(requestShardVersion)) {
+            ChunkVersion shardVersion =
+                metadata ? metadata->getShardVersion() : ChunkVersion::UNSHARDED();
 
-        if ( shardingState->enabled() ) {
-
-            CollectionMetadataPtr metadata = shardingState->getCollectionMetadata( nss.ns() );
-
-            if ( !ChunkVersion::isIgnoredVersion( requestShardVersion ) ) {
-
-                ChunkVersion shardVersion =
-                    metadata ? metadata->getShardVersion() : ChunkVersion::UNSHARDED();
-
-                if ( !requestShardVersion.isWriteCompatibleWith( shardVersion ) ) {
-                    *error = new WriteErrorDetail;
-                    buildStaleError( requestShardVersion, shardVersion, *error );
-                    return false;
-                }
+            if (!requestShardVersion.isWriteCompatibleWith(shardVersion)) {
+                result->setError(new WriteErrorDetail);
+                buildStaleError(requestShardVersion, shardVersion, result->getError());
+                return false;
             }
         }
+    }
 
+    return true;
+}
+
+static bool checkIsMasterForDatabase(const NamespaceString& ns, WriteOpResult* result) {
+    if (!repl::getGlobalReplicationCoordinator()->canAcceptWritesFor(ns)) {
+        WriteErrorDetail* errorDetail = new WriteErrorDetail;
+        result->setError(errorDetail);
+        errorDetail->setErrCode(ErrorCodes::NotMaster);
+        errorDetail->setErrMessage("Not primary while writing to " + ns.toString());
+        return false;
+    }
+    return true;
+}
+
+static void buildUniqueIndexError(const BSONObj& keyPattern,
+                                  const BSONObj& indexPattern,
+                                  WriteErrorDetail* error) {
+    error->setErrCode(ErrorCodes::CannotCreateIndex);
+    string errMsg = stream() << "cannot create unique index over " << indexPattern
+                             << " with shard key pattern " << keyPattern;
+    error->setErrMessage(errMsg);
+}
+
+static bool checkIndexConstraints(OperationContext* txn,
+                                  const BatchedCommandRequest& request,
+                                  WriteOpResult* result) {
+    const NamespaceString& nss = request.getTargetingNSS();
+    dassert(txn->lockState()->isCollectionLockedForMode(nss.ns(), MODE_IX));
+
+    if (!request.isUniqueIndexRequest())
+        return true;
+
+    ShardingState* shardingState = ShardingState::get(getGlobalServiceContext());
+    if (shardingState->enabled()) {
+        CollectionMetadataPtr metadata = shardingState->getCollectionMetadata(nss.ns());
+
+        if (metadata) {
+            ShardKeyPattern shardKeyPattern(metadata->getKeyPattern());
+            if (!shardKeyPattern.isUniqueIndexCompatible(request.getIndexKeyPattern())) {
+                result->setError(new WriteErrorDetail);
+                buildUniqueIndexError(
+                    metadata->getKeyPattern(), request.getIndexKeyPattern(), result->getError());
+
+                return false;
+            }
+        }
+    }
+
+    return true;
+}
+
+//
+// HELPERS FOR CUROP MANAGEMENT AND GLOBAL STATS
+//
+
+static void beginCurrentOp(OperationContext* txn, const BatchItemRef& currWrite) {
+    stdx::lock_guard<Client> lk(*txn->getClient());
+    CurOp* const currentOp = CurOp::get(txn);
+    currentOp->setOp_inlock(getOpCode(currWrite));
+    currentOp->ensureStarted();
+    currentOp->setNS_inlock(currWrite.getRequest()->getNS().ns());
+
+    currentOp->debug().op = currentOp->getOp();
+
+    if (currWrite.getOpType() == BatchedCommandRequest::BatchType_Insert) {
+        currentOp->setQuery_inlock(currWrite.getDocument());
+        currentOp->debug().query = currWrite.getDocument();
+        currentOp->debug().ninserted = 0;
+    } else if (currWrite.getOpType() == BatchedCommandRequest::BatchType_Update) {
+        currentOp->setQuery_inlock(currWrite.getUpdate()->getQuery());
+        currentOp->debug().query = currWrite.getUpdate()->getQuery();
+        currentOp->debug().updateobj = currWrite.getUpdate()->getUpdateExpr();
+        // Note: debug().nMatched, nModified and nmoved are set internally in update
+    } else {
+        dassert(currWrite.getOpType() == BatchedCommandRequest::BatchType_Delete);
+        currentOp->setQuery_inlock(currWrite.getDelete()->getQuery());
+        currentOp->debug().query = currWrite.getDelete()->getQuery();
+        currentOp->debug().ndeleted = 0;
+    }
+}
+
+void WriteBatchExecutor::incOpStats(const BatchItemRef& currWrite) {
+    if (currWrite.getOpType() == BatchedCommandRequest::BatchType_Insert) {
+        _opCounters->gotInsert();
+    } else if (currWrite.getOpType() == BatchedCommandRequest::BatchType_Update) {
+        _opCounters->gotUpdate();
+    } else {
+        dassert(currWrite.getOpType() == BatchedCommandRequest::BatchType_Delete);
+        _opCounters->gotDelete();
+    }
+}
+
+void WriteBatchExecutor::incWriteStats(const BatchItemRef& currWrite,
+                                       const WriteOpStats& stats,
+                                       const WriteErrorDetail* error,
+                                       CurOp* currentOp) {
+    if (currWrite.getOpType() == BatchedCommandRequest::BatchType_Insert) {
+        _stats->numInserted += stats.n;
+        currentOp->debug().ninserted += stats.n;
+        if (!error) {
+            _le->recordInsert(stats.n);
+        }
+    } else if (currWrite.getOpType() == BatchedCommandRequest::BatchType_Update) {
+        if (stats.upsertedID.isEmpty()) {
+            _stats->numMatched += stats.n;
+            _stats->numModified += stats.nModified;
+        } else {
+            ++_stats->numUpserted;
+        }
+
+        if (!error) {
+            _le->recordUpdate(stats.upsertedID.isEmpty() && stats.n > 0, stats.n, stats.upsertedID);
+        }
+    } else {
+        dassert(currWrite.getOpType() == BatchedCommandRequest::BatchType_Delete);
+        _stats->numDeleted += stats.n;
+        if (!error) {
+            _le->recordDelete(stats.n);
+        }
+        currentOp->debug().ndeleted += stats.n;
+    }
+
+    if (error) {
+        _le->setLastError(error->getErrCode(), error->getErrMessage().c_str());
+    }
+}
+
+static void finishCurrentOp(OperationContext* txn, WriteErrorDetail* opError) {
+    CurOp* currentOp = CurOp::get(txn);
+    currentOp->done();
+    int executionTime = currentOp->debug().executionTime = currentOp->totalTimeMillis();
+    recordCurOpMetrics(txn);
+    Top::get(txn->getClient()->getServiceContext())
+        .record(currentOp->getNS(),
+                currentOp->getOp(),
+                1,  // "write locked"
+                currentOp->totalTimeMicros(),
+                currentOp->isCommand());
+
+    if (opError) {
+        currentOp->debug().exceptionInfo =
+            ExceptionInfo(opError->getErrMessage(), opError->getErrCode());
+
+        LOG(3) << " Caught Assertion in " << opToString(currentOp->getOp()) << ", continuing "
+               << causedBy(opError->getErrMessage()) << endl;
+    }
+
+    bool logAll = logger::globalLogDomain()->shouldLog(logger::LogComponent::kWrite,
+                                                       logger::LogSeverity::Debug(1));
+    bool logSlow = executionTime > (serverGlobalParams.slowMS + currentOp->getExpectedLatencyMs());
+
+    if (logAll || logSlow) {
+        Locker::LockerInfo lockerInfo;
+        txn->lockState()->getLockerInfo(&lockerInfo);
+
+        LOG(0) << currentOp->debug().report(*currentOp, lockerInfo.stats);
+    }
+
+    if (currentOp->shouldDBProfile(executionTime)) {
+        profile(txn, CurOp::get(txn)->getOp());
+    }
+}
+
+// END HELPERS
+
+//
+// CORE WRITE OPERATIONS (declaration)
+// These functions write to the database and return stats and zero or one of:
+// - page fault
+// - error
+//
+
+static void singleInsert(OperationContext* txn,
+                         const BSONObj& docToInsert,
+                         Collection* collection,
+                         WriteOpResult* result);
+
+static void singleCreateIndex(OperationContext* txn,
+                              const BSONObj& indexDesc,
+                              WriteOpResult* result);
+
+static void multiUpdate(OperationContext* txn,
+                        const BatchItemRef& updateItem,
+                        WriteOpResult* result);
+
+static void multiRemove(OperationContext* txn,
+                        const BatchItemRef& removeItem,
+                        WriteOpResult* result);
+
+//
+// WRITE EXECUTION
+// In general, the exec* operations manage db lock state and stats before dispatching to the
+// core write operations, which are *only* responsible for performing a write and reporting
+// success or failure.
+//
+
+/**
+ * Representation of the execution state of execInserts.  Used by a single
+ * execution of execInserts in a single thread.
+ */
+class WriteBatchExecutor::ExecInsertsState {
+    MONGO_DISALLOW_COPYING(ExecInsertsState);
+
+public:
+    /**
+     * Constructs a new instance, for performing inserts described in "aRequest".
+     */
+    explicit ExecInsertsState(OperationContext* txn, const BatchedCommandRequest* aRequest);
+
+    /**
+     * Acquires the write lock and client context needed to perform the current write operation.
+     * Returns true on success, after which it is safe to use the "context" and "collection"
+     * members.  It is safe to call this function if this instance already holds the write lock.
+     *
+     * On failure, writeLock, context and collection will be NULL/clear.
+     */
+    bool lockAndCheck(WriteOpResult* result);
+
+    /**
+     * Releases the client context and write lock acquired by lockAndCheck.  Safe to call
+     * regardless of whether or not this state object currently owns the lock.
+     */
+    void unlock();
+
+    /**
+     * Returns true if this executor has the lock on the target database.
+     */
+    bool hasLock() {
+        return _dbLock.get();
+    }
+
+    /**
+     * Gets the target collection for the batch operation.  Value is undefined
+     * unless hasLock() is true.
+     */
+    Collection* getCollection() {
+        return _collection;
+    }
+
+    OperationContext* txn;
+
+    // Request object describing the inserts.
+    const BatchedCommandRequest* request;
+
+    // Index of the current insert operation to perform.
+    size_t currIndex = 0;
+
+    // Translation of insert documents in "request" into insert-ready forms.  This vector has a
+    // correspondence with elements of the "request", and "currIndex" is used to
+    // index both.
+    std::vector<StatusWith<BSONObj>> normalizedInserts;
+
+private:
+    bool _lockAndCheckImpl(WriteOpResult* result, bool intentLock);
+
+    ScopedTransaction _transaction;
+    // Guard object for the write lock on the target database.
+    std::unique_ptr<Lock::DBLock> _dbLock;
+    std::unique_ptr<Lock::CollectionLock> _collLock;
+
+    Database* _database = nullptr;
+    Collection* _collection = nullptr;
+};
+
+void WriteBatchExecutor::bulkExecute(const BatchedCommandRequest& request,
+                                     std::vector<BatchedUpsertDetail*>* upsertedIds,
+                                     std::vector<WriteErrorDetail*>* errors) {
+    boost::optional<DisableDocumentValidation> maybeDisableValidation;
+    if (request.shouldBypassValidation()) {
+        maybeDisableValidation.emplace(_txn);
+    }
+
+    if (request.getBatchType() == BatchedCommandRequest::BatchType_Insert) {
+        execInserts(request, errors);
+    } else if (request.getBatchType() == BatchedCommandRequest::BatchType_Update) {
+        for (size_t i = 0; i < request.sizeWriteOps(); i++) {
+            if (i + 1 == request.sizeWriteOps()) {
+                setupSynchronousCommit(_txn);
+            }
+
+            WriteErrorDetail* error = NULL;
+            BSONObj upsertedId;
+            execUpdate(BatchItemRef(&request, i), &upsertedId, &error);
+
+            if (!upsertedId.isEmpty()) {
+                BatchedUpsertDetail* batchUpsertedId = new BatchedUpsertDetail;
+                batchUpsertedId->setIndex(i);
+                batchUpsertedId->setUpsertedID(upsertedId);
+                upsertedIds->push_back(batchUpsertedId);
+            }
+
+            if (error) {
+                errors->push_back(error);
+                if (request.getOrdered())
+                    break;
+            }
+        }
+    } else {
+        dassert(request.getBatchType() == BatchedCommandRequest::BatchType_Delete);
+        for (size_t i = 0; i < request.sizeWriteOps(); i++) {
+            if (i + 1 == request.sizeWriteOps()) {
+                setupSynchronousCommit(_txn);
+            }
+
+            WriteErrorDetail* error = NULL;
+            execRemove(BatchItemRef(&request, i), &error);
+
+            if (error) {
+                errors->push_back(error);
+                if (request.getOrdered())
+                    break;
+            }
+        }
+    }
+
+    // Fill in stale version errors for unordered batches (update/delete can't do this on own)
+    if (!errors->empty() && !request.getOrdered()) {
+        const WriteErrorDetail* finalError = errors->back();
+
+        if (finalError->getErrCode() == ErrorCodes::StaleShardVersion) {
+            for (size_t i = finalError->getIndex() + 1; i < request.sizeWriteOps(); i++) {
+                WriteErrorDetail* dupStaleError = new WriteErrorDetail;
+                finalError->cloneTo(dupStaleError);
+                errors->push_back(dupStaleError);
+            }
+        }
+    }
+}
+
+// Goes over the request and preprocesses normalized versions of all the inserts in the request
+static void normalizeInserts(const BatchedCommandRequest& request,
+                             vector<StatusWith<BSONObj>>* normalizedInserts) {
+    normalizedInserts->reserve(request.sizeWriteOps());
+    for (size_t i = 0; i < request.sizeWriteOps(); ++i) {
+        BSONObj insertDoc = request.getInsertRequest()->getDocumentsAt(i);
+        StatusWith<BSONObj> normalInsert = fixDocumentForInsert(insertDoc);
+        normalizedInserts->push_back(normalInsert);
+        if (request.getOrdered() && !normalInsert.isOK())
+            break;
+    }
+}
+
+void WriteBatchExecutor::execInserts(const BatchedCommandRequest& request,
+                                     std::vector<WriteErrorDetail*>* errors) {
+    // Theory of operation:
+    //
+    // Instantiates an ExecInsertsState, which represents all of the state involved in the batch
+    // insert execution algorithm.  Most importantly, encapsulates the lock state.
+    //
+    // Every iteration of the loop in execInserts() processes one document insertion, by calling
+    // insertOne() exactly once for a given value of state.currIndex.
+    //
+    // If the ExecInsertsState indicates that the requisite write locks are not held, insertOne
+    // acquires them and performs lock-acquisition-time checks.  However, on non-error
+    // execution, it does not release the locks.  Therefore, the yielding logic in the while
+    // loop in execInserts() is solely responsible for lock release in the non-error case.
+    //
+    // Internally, insertOne loops performing the single insert until it completes without a
+    // PageFaultException, or until it fails with some kind of error.  Errors are mostly
+    // propagated via the request->error field, but DBExceptions or std::exceptions may escape,
+    // particularly on operation interruption.  These kinds of errors necessarily prevent
+    // further insertOne calls, and stop the batch.  As a result, the only expected source of
+    // such exceptions are interruptions.
+    ExecInsertsState state(_txn, &request);
+    normalizeInserts(request, &state.normalizedInserts);
+
+    ShardedConnectionInfo* info = ShardedConnectionInfo::get(_txn->getClient(), false);
+    if (info) {
+        if (request.isMetadataSet() && request.getMetadata()->isShardVersionSet()) {
+            info->setVersion(request.getTargetingNS(), request.getMetadata()->getShardVersion());
+        } else {
+            info->setVersion(request.getTargetingNS(), ChunkVersion::IGNORED());
+        }
+    }
+
+    // Yield frequency is based on the same constants used by PlanYieldPolicy.
+    ElapsedTracker elapsedTracker(internalQueryExecYieldIterations, internalQueryExecYieldPeriodMS);
+
+    for (state.currIndex = 0; state.currIndex < state.request->sizeWriteOps(); ++state.currIndex) {
+        if (state.currIndex + 1 == state.request->sizeWriteOps()) {
+            setupSynchronousCommit(_txn);
+        }
+
+        if (elapsedTracker.intervalHasElapsed()) {
+            // Yield between inserts.
+            if (state.hasLock()) {
+                // Release our locks. They get reacquired when insertOne() calls
+                // ExecInsertsState::lockAndCheck(). Since the lock manager guarantees FIFO
+                // queues waiting on locks, there is no need to explicitly sleep or give up
+                // control of the processor here.
+                state.unlock();
+
+                // This releases any storage engine held locks/snapshots.
+                _txn->recoveryUnit()->abandonSnapshot();
+            }
+
+            _txn->checkForInterrupt();
+            elapsedTracker.resetLastTime();
+        }
+
+        WriteErrorDetail* error = NULL;
+        execOneInsert(&state, &error);
+        if (error) {
+            errors->push_back(error);
+            error->setIndex(state.currIndex);
+            if (request.getOrdered())
+                return;
+        }
+    }
+}
+
+void WriteBatchExecutor::execUpdate(const BatchItemRef& updateItem,
+                                    BSONObj* upsertedId,
+                                    WriteErrorDetail** error) {
+    // BEGIN CURRENT OP
+    CurOp currentOp(_txn);
+    beginCurrentOp(_txn, updateItem);
+    incOpStats(updateItem);
+
+    ShardedConnectionInfo* info = ShardedConnectionInfo::get(_txn->getClient(), false);
+    if (info) {
+        auto rootRequest = updateItem.getRequest();
+        if (!updateItem.getUpdate()->getMulti() && rootRequest->isMetadataSet() &&
+            rootRequest->getMetadata()->isShardVersionSet()) {
+            info->setVersion(rootRequest->getTargetingNS(),
+                             rootRequest->getMetadata()->getShardVersion());
+        } else {
+            info->setVersion(rootRequest->getTargetingNS(), ChunkVersion::IGNORED());
+        }
+    }
+
+    WriteOpResult result;
+
+    multiUpdate(_txn, updateItem, &result);
+
+    if (!result.getStats().upsertedID.isEmpty()) {
+        *upsertedId = result.getStats().upsertedID;
+    }
+    // END CURRENT OP
+    incWriteStats(updateItem, result.getStats(), result.getError(), &currentOp);
+    finishCurrentOp(_txn, result.getError());
+
+    // End current transaction and release snapshot.
+    _txn->recoveryUnit()->abandonSnapshot();
+
+    if (result.getError()) {
+        result.getError()->setIndex(updateItem.getItemIndex());
+        *error = result.releaseError();
+    }
+}
+
+void WriteBatchExecutor::execRemove(const BatchItemRef& removeItem, WriteErrorDetail** error) {
+    // Removes are similar to updates, but page faults are handled externally
+
+    // BEGIN CURRENT OP
+    CurOp currentOp(_txn);
+    beginCurrentOp(_txn, removeItem);
+    incOpStats(removeItem);
+
+    ShardedConnectionInfo* info = ShardedConnectionInfo::get(_txn->getClient(), false);
+    if (info) {
+        auto rootRequest = removeItem.getRequest();
+        if (removeItem.getDelete()->getLimit() == 1 && rootRequest->isMetadataSet() &&
+            rootRequest->getMetadata()->isShardVersionSet()) {
+            info->setVersion(rootRequest->getTargetingNS(),
+                             rootRequest->getMetadata()->getShardVersion());
+        } else {
+            info->setVersion(rootRequest->getTargetingNS(), ChunkVersion::IGNORED());
+        }
+    }
+
+    WriteOpResult result;
+
+    multiRemove(_txn, removeItem, &result);
+
+    // END CURRENT OP
+    incWriteStats(removeItem, result.getStats(), result.getError(), &currentOp);
+    finishCurrentOp(_txn, result.getError());
+
+    // End current transaction and release snapshot.
+    _txn->recoveryUnit()->abandonSnapshot();
+
+    if (result.getError()) {
+        result.getError()->setIndex(removeItem.getItemIndex());
+        *error = result.releaseError();
+    }
+}
+
+//
+// IN-DB-LOCK CORE OPERATIONS
+//
+
+WriteBatchExecutor::ExecInsertsState::ExecInsertsState(OperationContext* txn,
+                                                       const BatchedCommandRequest* aRequest)
+    : txn(txn), request(aRequest), _transaction(txn, MODE_IX) {}
+
+bool WriteBatchExecutor::ExecInsertsState::_lockAndCheckImpl(WriteOpResult* result,
+                                                             bool intentLock) {
+    if (hasLock()) {
+        CurOp::get(txn)->raiseDbProfileLevel(_database->getProfilingLevel());
         return true;
     }
 
-    static void buildUniqueIndexError( const BSONObj& keyPattern,
-                                       const BSONObj& indexPattern,
-                                       WriteErrorDetail* error ) {
-        error->setErrCode( ErrorCodes::CannotCreateIndex );
-        string errMsg = stream() << "cannot create unique index over " << indexPattern
-                                 << " with shard key pattern " << keyPattern;
-        error->setErrMessage( errMsg );
+    if (request->isInsertIndexRequest())
+        intentLock = false;  // can't build indexes in intent mode
+
+    const NamespaceString& nss = request->getNS();
+    invariant(!_collLock);
+    invariant(!_dbLock);
+    _dbLock =
+        stdx::make_unique<Lock::DBLock>(txn->lockState(), nss.db(), intentLock ? MODE_IX : MODE_X);
+    _database = dbHolder().get(txn, nss.ns());
+    if (intentLock && !_database) {
+        // Ensure exclusive lock in case the database doesn't yet exist
+        _dbLock.reset();
+        _dbLock = stdx::make_unique<Lock::DBLock>(txn->lockState(), nss.db(), MODE_X);
+        intentLock = false;
+    }
+    _collLock = stdx::make_unique<Lock::CollectionLock>(
+        txn->lockState(), nss.ns(), intentLock ? MODE_IX : MODE_X);
+    if (!checkIsMasterForDatabase(nss, result)) {
+        return false;
+    }
+    if (!checkShardVersion(txn, *request, result)) {
+        return false;
+    }
+    if (!checkIndexConstraints(txn, *request, result)) {
+        return false;
     }
 
-    static bool checkIndexConstraints( ShardingState* shardingState,
-                                       const BatchedCommandRequest& request,
-                                       WriteErrorDetail** error ) {
-
-        const NamespaceString nss( request.getTargetingNS() );
-        Lock::assertWriteLocked( nss.ns() );
-
-        if ( !request.isUniqueIndexRequest() )
-            return true;
-
-        if ( shardingState->enabled() ) {
-
-            CollectionMetadataPtr metadata = shardingState->getCollectionMetadata( nss.ns() );
-
-            if ( metadata ) {
-                if ( !isUniqueIndexCompatible( metadata->getKeyPattern(),
-                                               request.getIndexKeyPattern() ) ) {
-
-                    *error = new WriteErrorDetail;
-                    buildUniqueIndexError( metadata->getKeyPattern(),
-                                           request.getIndexKeyPattern(),
-                                           *error );
-
-                    return false;
-                }
-            }
+    if (!_database) {
+        invariant(!intentLock);
+        _database = dbHolder().openDb(txn, nss.ns());
+    }
+    CurOp::get(txn)->raiseDbProfileLevel(_database->getProfilingLevel());
+    _collection = _database->getCollection(request->getTargetingNS());
+    if (!_collection) {
+        if (intentLock) {
+            // try again with full X lock.
+            unlock();
+            return _lockAndCheckImpl(result, false);
         }
 
+        WriteUnitOfWork wunit(txn);
+        // Implicitly create if it doesn't exist
+        _collection = _database->createCollection(txn, request->getTargetingNS());
+        if (!_collection) {
+            result->setError(
+                toWriteError(Status(ErrorCodes::InternalError,
+                                    "could not create collection " + request->getTargetingNS())));
+            return false;
+        }
+        wunit.commit();
+    }
+    return true;
+}
+
+bool WriteBatchExecutor::ExecInsertsState::lockAndCheck(WriteOpResult* result) {
+    if (_lockAndCheckImpl(result, true))
         return true;
+    unlock();
+    return false;
+}
+
+void WriteBatchExecutor::ExecInsertsState::unlock() {
+    _collection = nullptr;
+    _database = nullptr;
+    _collLock.reset();
+    _dbLock.reset();
+}
+
+static void insertOne(WriteBatchExecutor::ExecInsertsState* state, WriteOpResult* result) {
+    // we have to be top level so we can retry
+    invariant(!state->txn->lockState()->inAWriteUnitOfWork());
+    invariant(state->currIndex < state->normalizedInserts.size());
+
+    const StatusWith<BSONObj>& normalizedInsert(state->normalizedInserts[state->currIndex]);
+
+    if (!normalizedInsert.isOK()) {
+        result->setError(toWriteError(normalizedInsert.getStatus()));
+        return;
     }
 
-    //
-    // HELPERS FOR CUROP MANAGEMENT AND GLOBAL STATS
-    //
+    const BSONObj& insertDoc = normalizedInsert.getValue().isEmpty()
+        ? state->request->getInsertRequest()->getDocumentsAt(state->currIndex)
+        : normalizedInsert.getValue();
 
-    static CurOp* beginCurrentOp( Client* client, const BatchItemRef& currWrite ) {
-
-        // Execute the write item as a child operation of the current operation.
-        auto_ptr<CurOp> currentOp( new CurOp( client, client->curop() ) );
-
-        // Set up the child op with more info
-        HostAndPort remote =
-            client->hasRemote() ? client->getRemote() : HostAndPort( "0.0.0.0", 0 );
-        // TODO Modify CurOp "wrapped" constructor to take an opcode, so calling .reset()
-        // is unneeded
-        currentOp->reset( remote, getOpCode( currWrite.getRequest()->getBatchType() ) );
-        currentOp->ensureStarted();
-        currentOp->setNS( currWrite.getRequest()->getNS() );
-
-        currentOp->debug().ns = currentOp->getNS();
-        currentOp->debug().op = currentOp->getOp();
-
-        if ( currWrite.getOpType() == BatchedCommandRequest::BatchType_Insert ) {
-            // No-op for insert, we don't update query or updateobj
-        }
-        else if ( currWrite.getOpType() == BatchedCommandRequest::BatchType_Update ) {
-            currentOp->setQuery( currWrite.getUpdate()->getQuery() );
-            currentOp->debug().query = currWrite.getUpdate()->getQuery();
-            currentOp->debug().updateobj = currWrite.getUpdate()->getUpdateExpr();
-        }
-        else {
-            dassert( currWrite.getOpType() == BatchedCommandRequest::BatchType_Delete );
-            currentOp->setQuery( currWrite.getDelete()->getQuery() );
-            currentOp->debug().query = currWrite.getDelete()->getQuery();
-        }
-
-        return currentOp.release();
-    }
-
-    void WriteBatchExecutor::incOpStats( const BatchItemRef& currWrite ) {
-
-        if ( currWrite.getOpType() == BatchedCommandRequest::BatchType_Insert ) {
-            // No-op, for inserts we increment not on the op but once for each write
-        }
-        else if ( currWrite.getOpType() == BatchedCommandRequest::BatchType_Update ) {
-            _opCounters->gotUpdate();
-        }
-        else {
-            dassert( currWrite.getOpType() == BatchedCommandRequest::BatchType_Delete );
-            _opCounters->gotDelete();
-        }
-    }
-
-    void WriteBatchExecutor::incWriteStats( const BatchItemRef& currWrite,
-                                            const WriteOpStats& stats,
-                                            const WriteErrorDetail* error,
-                                            CurOp* currentOp ) {
-
-        if ( currWrite.getOpType() == BatchedCommandRequest::BatchType_Insert ) {
-            // We increment batch inserts like individual inserts
-            _opCounters->gotInsert();
-            _stats->numInserted += stats.n;
-            _le->nObjects = stats.n;
-            currentOp->debug().ninserted += stats.n;
-        }
-        else if ( currWrite.getOpType() == BatchedCommandRequest::BatchType_Update ) {
-            if ( stats.upsertedID.isEmpty() ) {
-                _stats->numMatched += stats.n;
-                _stats->numModified += stats.nModified;
+    int attempt = 0;
+    while (true) {
+        try {
+            if (!state->request->isInsertIndexRequest()) {
+                if (state->lockAndCheck(result)) {
+                    singleInsert(state->txn, insertDoc, state->getCollection(), result);
+                }
+            } else {
+                singleCreateIndex(state->txn, insertDoc, result);
             }
-            else {
-                ++_stats->numUpserted;
-            }
-
-            if ( !error ) {
-                _le->recordUpdate( stats.upsertedID.isEmpty() && stats.n > 0,
-                        stats.n,
-                        stats.upsertedID );
-            }
-        }
-        else {
-            dassert( currWrite.getOpType() == BatchedCommandRequest::BatchType_Delete );
-            _stats->numDeleted += stats.n;
-            if ( !error ) {
-                _le->recordDelete( stats.n );
-            }
-            currentOp->debug().ndeleted += stats.n;
-        }
-
-        // Errors reported in LastError are handled internally in write ops for now
-        // TODO: Move error reporting out of write op internals?
-    }
-
-    static void finishCurrentOp( Client* client, CurOp* currentOp, WriteErrorDetail* opError ) {
-
-        currentOp->done();
-        int executionTime = currentOp->debug().executionTime = currentOp->totalTimeMillis();
-        currentOp->debug().recordStats();
-
-        if ( opError ) {
-            currentOp->debug().exceptionInfo = ExceptionInfo( opError->getErrMessage(),
-                                                              opError->getErrCode() );
-
-            MONGO_TLOG(3) << " Caught Assertion in " << opToString( currentOp->getOp() )
-                          << ", continuing " << causedBy( opError->getErrMessage() ) << endl;
-        }
-
-        bool logAll = logger::globalLogDomain()->shouldLog( logger::LogSeverity::Debug( 1 ) );
-        bool logSlow = executionTime
-                       > ( serverGlobalParams.slowMS + currentOp->getExpectedLatencyMs() );
-
-        if ( logAll || logSlow ) {
-            MONGO_TLOG(1) << currentOp->debug().report( *currentOp ) << endl;
-        }
-
-        if ( currentOp->shouldDBProfile( executionTime ) ) {
-            profile( *client, currentOp->getOp(), *currentOp );
+            break;
+        } catch (const WriteConflictException& wce) {
+            state->unlock();
+            CurOp::get(state->txn)->debug().writeConflicts++;
+            state->txn->recoveryUnit()->abandonSnapshot();
+            WriteConflictException::logAndBackoff(
+                attempt++,
+                "insert",
+                state->getCollection() ? state->getCollection()->ns().ns() : "index");
+        } catch (const StaleConfigException& staleExcep) {
+            result->setError(new WriteErrorDetail);
+            result->getError()->setErrCode(ErrorCodes::StaleShardVersion);
+            buildStaleError(
+                staleExcep.getVersionReceived(), staleExcep.getVersionWanted(), result->getError());
+            break;
+        } catch (const DBException& ex) {
+            Status status(ex.toStatus());
+            if (ErrorCodes::isInterruption(status.code()))
+                throw;
+            result->setError(toWriteError(status));
+            break;
         }
     }
 
-    // END HELPERS
-
-    //
-    // CORE WRITE OPERATIONS (declaration)
-    // These functions write to the database and return stats and zero or one of:
-    // - page fault
-    // - error
-    //
-
-    namespace {
-
-        /**
-         * Data structure to safely hold and clean up results of single write operations.
-         */
-        struct WriteOpResult {
-
-            WriteOpResult() :
-                fault( NULL ), error( NULL ) {
-            }
-
-            ~WriteOpResult() {
-                dassert( !( fault && error ) );
-                reset();
-            }
-
-            WriteErrorDetail* releaseError() {
-                WriteErrorDetail* released = error;
-                error = NULL;
-                return released;
-            }
-
-            void reset() {
-                if ( fault )
-                    delete fault;
-                if ( error )
-                    delete error;
-
-                fault = NULL;
-                error = NULL;
-
-                stats.reset();
-            }
-
-            WriteOpStats stats;
-
-            // Only one of these may be set at once
-            PageFaultException* fault;
-            WriteErrorDetail* error;
-        };
-
+    // Errors release the write lock, as a matter of policy.
+    if (result->getError()) {
+        state->txn->recoveryUnit()->abandonSnapshot();
+        state->unlock();
     }
+}
 
-    static void singleInsert( const BatchItemRef& insertItem,
-                              const BSONObj& normalInsert,
-                              Collection* collection,
-                              WriteOpResult* result );
+void WriteBatchExecutor::execOneInsert(ExecInsertsState* state, WriteErrorDetail** error) {
+    BatchItemRef currInsertItem(state->request, state->currIndex);
+    CurOp currentOp(_txn);
+    beginCurrentOp(_txn, currInsertItem);
+    incOpStats(currInsertItem);
 
-    static void singleCreateIndex( const BatchItemRef& insertItem,
-                                   const BSONObj& normalInsert,
-                                   Collection* collection,
-                                   WriteOpResult* result );
+    WriteOpResult result;
+    insertOne(state, &result);
 
-    static void multiUpdate( const BatchItemRef& updateItem, WriteOpResult* result );
+    incWriteStats(currInsertItem, result.getStats(), result.getError(), &currentOp);
+    finishCurrentOp(_txn, result.getError());
 
-    static void multiRemove( const BatchItemRef& removeItem, WriteOpResult* result );
+    if (result.getError()) {
+        *error = result.releaseError();
+    }
+}
 
-    //
-    // WRITE EXECUTION
-    // In general, the execXXX operations manage db lock state and stats before dispatching to the
-    // core write operations, which are *only* responsible for performing a write and reporting
-    // success or failure.
-    //
+/**
+ * Perform a single insert into a collection.  Requires the insert be preprocessed and the
+ * collection already has been created.
+ *
+ * Might fault or error, otherwise populates the result.
+ */
+static void singleInsert(OperationContext* txn,
+                         const BSONObj& docToInsert,
+                         Collection* collection,
+                         WriteOpResult* result) {
+    const string& insertNS = collection->ns().ns();
+    invariant(txn->lockState()->isCollectionLockedForMode(insertNS, MODE_IX));
 
-    void WriteBatchExecutor::bulkExecute( const BatchedCommandRequest& request,
-                                          std::vector<BatchedUpsertDetail*>* upsertedIds,
-                                          std::vector<WriteErrorDetail*>* errors ) {
+    WriteUnitOfWork wunit(txn);
+    StatusWith<RecordId> status = collection->insertDocument(txn, docToInsert, true);
 
-        if ( request.getBatchType() == BatchedCommandRequest::BatchType_Insert ) {
-            execInserts( request, errors );
+    if (!status.isOK()) {
+        result->setError(toWriteError(status.getStatus()));
+    } else {
+        result->getStats().n = 1;
+        wunit.commit();
+    }
+}
+
+/**
+ * Perform a single index creation on a collection.  Requires the index descriptor be
+ * preprocessed.
+ *
+ * Might fault or error, otherwise populates the result.
+ */
+static void singleCreateIndex(OperationContext* txn,
+                              const BSONObj& indexDesc,
+                              WriteOpResult* result) {
+    BSONElement nsElement = indexDesc["ns"];
+    uassert(ErrorCodes::NoSuchKey, "Missing \"ns\" field in index description", !nsElement.eoo());
+    uassert(ErrorCodes::TypeMismatch,
+            str::stream() << "Expected \"ns\" field of index description to be a "
+                             "string, "
+                             "but found a " << typeName(nsElement.type()),
+            nsElement.type() == String);
+    const NamespaceString ns(nsElement.valueStringData());
+    BSONObjBuilder cmdBuilder;
+    cmdBuilder << "createIndexes" << ns.coll();
+    cmdBuilder << "indexes" << BSON_ARRAY(indexDesc);
+    BSONObj cmd = cmdBuilder.done();
+    Command* createIndexesCmd = Command::findCommand("createIndexes");
+    invariant(createIndexesCmd);
+    std::string errmsg;
+    BSONObjBuilder resultBuilder;
+    const bool success =
+        createIndexesCmd->run(txn, ns.db().toString(), cmd, 0, errmsg, resultBuilder);
+    Command::appendCommandStatus(resultBuilder, success, errmsg);
+    BSONObj cmdResult = resultBuilder.done();
+    uassertStatusOK(Command::getStatusFromCommandResult(cmdResult));
+    result->getStats().n =
+        cmdResult["numIndexesAfter"].numberInt() - cmdResult["numIndexesBefore"].numberInt();
+}
+
+static void multiUpdate(OperationContext* txn,
+                        const BatchItemRef& updateItem,
+                        WriteOpResult* result) {
+    const NamespaceString nsString(updateItem.getRequest()->getNS());
+    const bool isMulti = updateItem.getUpdate()->getMulti();
+    UpdateRequest request(nsString);
+    request.setQuery(updateItem.getUpdate()->getQuery());
+    request.setUpdates(updateItem.getUpdate()->getUpdateExpr());
+    request.setMulti(isMulti);
+    request.setUpsert(updateItem.getUpdate()->getUpsert());
+    UpdateLifecycleImpl updateLifecycle(true, request.getNamespaceString());
+    request.setLifecycle(&updateLifecycle);
+
+    // Updates from the write commands path can yield.
+    request.setYieldPolicy(PlanExecutor::YIELD_AUTO);
+
+    int attempt = 0;
+    bool createCollection = false;
+    for (int fakeLoop = 0; fakeLoop < 1; fakeLoop++) {
+        ParsedUpdate parsedUpdate(txn, &request);
+        Status status = parsedUpdate.parseRequest();
+        if (!status.isOK()) {
+            result->setError(toWriteError(status));
+            return;
         }
-        else if ( request.getBatchType() == BatchedCommandRequest::BatchType_Update ) {
-            for ( size_t i = 0; i < request.sizeWriteOps(); i++ ) {
 
-                WriteErrorDetail* error = NULL;
-                BSONObj upsertedId;
-                execUpdate( BatchItemRef( &request, i ), &upsertedId, &error );
+        if (createCollection) {
+            MONGO_WRITE_CONFLICT_RETRY_LOOP_BEGIN {
+                const AutoGetOrCreateDb adb{txn, nsString.db(), MODE_X};
 
-                if ( !upsertedId.isEmpty() ) {
-                    BatchedUpsertDetail* batchUpsertedId = new BatchedUpsertDetail;
-                    batchUpsertedId->setIndex( i );
-                    batchUpsertedId->setUpsertedID( upsertedId );
-                    upsertedIds->push_back( batchUpsertedId );
+                if (!checkIsMasterForDatabase(nsString, result)) {
+                    return;
                 }
 
-                if ( error ) {
-                    errors->push_back( error );
-                    if ( request.getOrdered() )
-                        break;
+                Database* const db = adb.getDb();
+                if (db->getCollection(nsString.ns())) {
+                    // someone else beat us to it
+                } else {
+                    WriteUnitOfWork wuow(txn);
+                    uassertStatusOK(userCreateNS(txn, db, nsString.ns(), BSONObj()));
+                    wuow.commit();
                 }
             }
-        }
-        else {
-            dassert( request.getBatchType() == BatchedCommandRequest::BatchType_Delete );
-            for ( size_t i = 0; i < request.sizeWriteOps(); i++ ) {
-
-                WriteErrorDetail* error = NULL;
-                execRemove( BatchItemRef( &request, i ), &error );
-
-                if ( error ) {
-                    errors->push_back( error );
-                    if ( request.getOrdered() )
-                        break;
-                }
-            }
+            MONGO_WRITE_CONFLICT_RETRY_LOOP_END(txn, "update", nsString.ns());
         }
 
-        // Fill in stale version errors for unordered batches (update/delete can't do this on own)
-        if ( !errors->empty() && !request.getOrdered() ) {
+        ///////////////////////////////////////////
+        ScopedTransaction transaction(txn, MODE_IX);
+        Lock::DBLock dbLock(txn->lockState(), nsString.db(), MODE_IX);
+        Lock::CollectionLock colLock(
+            txn->lockState(), nsString.ns(), parsedUpdate.isIsolated() ? MODE_X : MODE_IX);
+        ///////////////////////////////////////////
 
-            const WriteErrorDetail* finalError = errors->back();
-
-            if ( finalError->getErrCode() == ErrorCodes::StaleShardVersion ) {
-                for ( size_t i = finalError->getIndex() + 1; i < request.sizeWriteOps(); i++ ) {
-                    WriteErrorDetail* dupStaleError = new WriteErrorDetail;
-                    finalError->cloneTo( dupStaleError );
-                    errors->push_back( dupStaleError );
-                }
-            }
+        if (!checkIsMasterForDatabase(nsString, result)) {
+            return;
         }
-    }
 
-    // Does preprocessing of inserts, special casing for indexes
-    // TODO: Simplify this when indexes aren't here anymore
-    static StatusWith<BSONObj> normalizeInsert( const BatchItemRef& insertItem ) {
-
-        if ( insertItem.getRequest()->isInsertIndexRequest() ) {
-
-            StatusWith<BSONObj> normalInsert = fixDocumentForInsert( insertItem.getDocument() );
-            if ( normalInsert.isOK() && insertItem.getDocument()["ns"].type() != String ) {
-                return StatusWith<BSONObj>( ErrorCodes::BadValue, "tried to create an index "
-                                            "without specifying namespace" );
-            }
-            else {
-                return normalInsert;
-            }
+        if (!checkShardVersion(txn, *updateItem.getRequest(), result)) {
+            return;
         }
-        else {
-            return fixDocumentForInsert( insertItem.getDocument() );
-        }
-    }
 
-    // Goes over the request and preprocesses normalized versions of all the inserts in the request
-    static void normalizeInserts( const BatchedCommandRequest& request,
-                                  vector<StatusWith<BSONObj> >* normalInserts ) {
+        Database* const db = dbHolder().get(txn, nsString.db());
 
-        for ( size_t i = 0; i < request.sizeWriteOps(); ++i ) {
-            StatusWith<BSONObj> normalInsert = normalizeInsert( BatchItemRef( &request, i ) );
-            normalInserts->push_back( normalInsert );
-            if ( request.getOrdered() && !normalInsert.isOK() )
-                break;
-        }
-    }
-
-    void WriteBatchExecutor::execInserts( const BatchedCommandRequest& request,
-                                          std::vector<WriteErrorDetail*>* errors ) {
-
-        // Bulk insert is a bit different from other bulk operations in that multiple request docs
-        // can be processed at once inside the write lock.
-
-        const NamespaceString nss( request.getTargetingNS() );
-        scoped_ptr<BatchItemRef> currInsertItem( new BatchItemRef( &request, 0 ) );
-
-        //
-        // BEGIN CURRENT OP
-        //
-
-        scoped_ptr<CurOp> currentOp( beginCurrentOp( _client, *currInsertItem ) );
-        incOpStats( *currInsertItem );
-
-        // Go through our request and do some preprocessing on insert documents outside the lock to
-        // validate and put them in a normalized form - i.e. put _id in front and fill in
-        // timestamps.  The insert document may also be invalid.
-        // TODO:  Might be more efficient to do in batches.
-        vector<StatusWith<BSONObj> > normalInserts;
-        normalizeInserts( request, &normalInserts );
-
-        WriteErrorDetail* lastOpError = NULL;
-
-        while ( currInsertItem->getItemIndex() < static_cast<int>( request.sizeWriteOps() ) ) {
-
-            WriteOpResult currResult;
-
-            {
-                PageFaultRetryableSection pFaultSection;
-
-                ////////////////////////////////////
-                Lock::DBWrite writeLock( nss.ns() );
-                ////////////////////////////////////
-
-                // Check version inside of write lock
-
-                if ( checkShardVersion( &shardingState, request, &currResult.error )
-                     && checkIndexConstraints( &shardingState, request, &currResult.error ) ) {
-
-                    //
-                    // Get the collection for the insert
-                    //
-
-                    scoped_ptr<Client::Context> writeContext;
-                    Collection* collection = NULL;
-
-                    try {
-                        // Context once we're locked, to set more details in currentOp()
-                        // TODO: better constructor?
-                        writeContext.reset( new Client::Context( request.getNS(),
-                                                                 storageGlobalParams.dbpath,
-                                                                 false /* don't check version */) );
-
-                        Database* database = writeContext->db();
-                        dassert( database );
-                        collection = database->getCollection( nss.ns() );
-
-                        if ( !collection ) {
-                            // Implicitly create if it doesn't exist
-                            collection = database->createCollection( nss.ns() );
-                            if ( !collection ) {
-                                currResult.error =
-                                    toWriteError( Status( ErrorCodes::InternalError,
-                                                          "could not create collection" ) );
-                            }
-                        }
-                    }
-                    catch ( const DBException& ex ) {
-                        currResult.error = toWriteError( ex.toStatus() );
-                    }
-
-                    //
-                    // Perform writes inside write lock
-                    //
-
-                    while ( collection
-                            && currInsertItem->getItemIndex()
-                               < static_cast<int>( request.sizeWriteOps() ) ) {
-
-                        // Get the actual document we want to write, assuming it's valid
-                        const StatusWith<BSONObj>& normalInsert = //
-                            normalInserts[currInsertItem->getItemIndex()];
-
-                        const BSONObj& normalInsertDoc =
-                            normalInsert.getValue().isEmpty() ?
-                                currInsertItem->getDocument() : normalInsert.getValue();
-
-                        if ( !normalInsert.isOK() ) {
-                            // This insert failed on preprocessing
-                            currResult.error = toWriteError( normalInsert.getStatus() );
-                        }
-                        else if ( !request.isInsertIndexRequest() ) {
-                            // Try the insert
-                            singleInsert( *currInsertItem,
-                                          normalInsertDoc,
-                                          collection,
-                                          &currResult );
-                        }
-                        else {
-                            // Try the create index
-                            singleCreateIndex( *currInsertItem,
-                                               normalInsertDoc,
-                                               collection,
-                                               &currResult );
-                        }
-
-                        // Faults release the write lock
-                        if ( currResult.fault )
-                            break;
-
-                        // In general, we might have stats and errors
-                        incWriteStats( *currInsertItem,
-                                       currResult.stats,
-                                       currResult.error,
-                                       currentOp.get() );
-
-                        // Errors release the write lock
-                        if ( currResult.error )
-                            break;
-
-                        // Increment in the write lock and reset the stats for next time
-                        currInsertItem.reset( new BatchItemRef( &request,
-                                                                currInsertItem->getItemIndex()
-                                                                + 1 ) );
-                        currResult.reset();
-                    }
-                }
-
-            } // END WRITE LOCK
-
-            //
-            // Store the current error if it exists
-            //
-
-            lastOpError = currResult.error;
-
-            if ( currResult.error ) {
-
-                errors->push_back( currResult.releaseError() );
-                errors->back()->setIndex( currInsertItem->getItemIndex() );
-
-                // Break early for ordered batches
-                if ( request.getOrdered() )
-                    break;
+        if (db == NULL) {
+            if (createCollection) {
+                // we raced with some, accept defeat
+                result->getStats().nModified = 0;
+                result->getStats().n = 0;
+                return;
             }
 
-            //
-            // Fault or increment
-            //
-
-            if ( currResult.fault ) {
-                dassert( !lastOpError );
-                // Check page fault out of lock
-                currResult.fault->touch();
-            }
-            else {
-                // Increment if not a fault
-                currInsertItem.reset( new BatchItemRef( &request,
-                                                        currInsertItem->getItemIndex() + 1 ) );
-            }
-        }
-
-        //
-        // END CURRENT OP
-        //
-
-        finishCurrentOp( _client, currentOp.get(), lastOpError );
-    }
-
-    void WriteBatchExecutor::execUpdate( const BatchItemRef& updateItem,
-                                         BSONObj* upsertedId,
-                                         WriteErrorDetail** error ) {
-
-        // Updates currently do a lot of the lock management internally
-
-        const BatchedCommandRequest& request = *updateItem.getRequest();
-        const NamespaceString nss( updateItem.getRequest()->getNS() );
-
-        // BEGIN CURRENT OP
-        scoped_ptr<CurOp> currentOp( beginCurrentOp( _client, updateItem ) );
-        incOpStats( updateItem );
-
-        WriteOpResult result;
-
-        {
-            ///////////////////////////////////////////
-            Lock::DBWrite writeLock( nss.ns() );
-            ///////////////////////////////////////////
-
-            // Check version once we're locked
-
-            if ( checkShardVersion( &shardingState, request, &result.error ) ) {
-
-                // Context once we're locked, to set more details in currentOp()
-                // TODO: better constructor?
-                Client::Context writeContext( nss.ns(),
-                                              storageGlobalParams.dbpath,
-                                              false /* don't check version */);
-
-                multiUpdate( updateItem, &result );
-
-                incWriteStats( updateItem, result.stats, result.error, currentOp.get() );
-
-                if ( !result.stats.upsertedID.isEmpty() ) {
-                    *upsertedId = result.stats.upsertedID.getOwned();
-                }
-            }
-        }
-
-        // END CURRENT OP
-        finishCurrentOp( _client, currentOp.get(), result.error );
-
-        if ( result.error ) {
-            result.error->setIndex( updateItem.getItemIndex() );
-            *error = result.releaseError();
-        }
-    }
-
-    void WriteBatchExecutor::execRemove( const BatchItemRef& removeItem,
-                                         WriteErrorDetail** error ) {
-
-        // Removes are similar to updates, but page faults are handled externally
-
-        const BatchedCommandRequest& request = *removeItem.getRequest();
-        const NamespaceString nss( removeItem.getRequest()->getNS() );
-
-        // BEGIN CURRENT OP
-        scoped_ptr<CurOp> currentOp( beginCurrentOp( _client, removeItem ) );
-        incOpStats( removeItem );
-
-        WriteOpResult result;
-
-        while ( true ) {
-
-            {
-                // NOTE: Deletes will not fault outside the lock once any data has been written
-                PageFaultRetryableSection pFaultSection;
-
-                ///////////////////////////////////////////
-                Lock::DBWrite writeLock( nss.ns() );
-                ///////////////////////////////////////////
-
-                // Check version once we're locked
-
-                if ( !checkShardVersion( &shardingState, request, &result.error ) ) {
-                    // Version error
-                    break;
-                }
-
-                // Context once we're locked, to set more details in currentOp()
-                // TODO: better constructor?
-                Client::Context writeContext( nss.ns(),
-                                              storageGlobalParams.dbpath,
-                                              false /* don't check version */);
-
-                multiRemove( removeItem, &result );
-
-                if ( !result.fault ) {
-                    incWriteStats( removeItem, result.stats, result.error, currentOp.get() );
-                    break;
-                }
+            // Database not yet created
+            if (!request.isUpsert()) {
+                // not an upsert, no database, nothing to do
+                result->getStats().nModified = 0;
+                result->getStats().n = 0;
+                return;
             }
 
-            //
-            // Check page fault out of lock
-            //
-
-            dassert( result.fault );
-            result.fault->touch();
-            result.reset();
+            //  upsert, don't try to get a context as no MODE_X lock is held
+            fakeLoop = -1;
+            createCollection = true;
+            continue;
         }
 
-        // END CURRENT OP
-        finishCurrentOp( _client, currentOp.get(), result.error );
+        CurOp::get(txn)->raiseDbProfileLevel(db->getProfilingLevel());
+        Collection* collection = db->getCollection(nsString.ns());
 
-        if ( result.error ) {
-            result.error->setIndex( removeItem.getItemIndex() );
-            *error = result.releaseError();
+        if (collection == NULL) {
+            if (createCollection) {
+                // we raced with some, accept defeat
+                result->getStats().nModified = 0;
+                result->getStats().n = 0;
+                return;
+            }
+
+            if (!request.isUpsert()) {
+                // not an upsert, no collection, nothing to do
+                result->getStats().nModified = 0;
+                result->getStats().n = 0;
+                return;
+            }
+
+            // upsert, mark that we should create collection
+            fakeLoop = -1;
+            createCollection = true;
+            continue;
         }
-    }
 
-    //
-    // IN-DB-LOCK CORE OPERATIONS
-    //
-
-    /**
-     * Perform a single insert into a collection.  Requires the insert be preprocessed and the
-     * collection already has been created.
-     *
-     * Might fault or error, otherwise populates the result.
-     */
-    static void singleInsert( const BatchItemRef& insertItem,
-                              const BSONObj& normalInsert,
-                              Collection* collection,
-                              WriteOpResult* result ) {
-
-        const string& insertNS = insertItem.getRequest()->getNS();
-
-        Lock::assertWriteLocked( insertNS );
+        OpDebug* debug = &CurOp::get(txn)->debug();
 
         try {
+            invariant(collection);
+            std::unique_ptr<PlanExecutor> exec =
+                uassertStatusOK(getExecutorUpdate(txn, collection, &parsedUpdate, debug));
 
-            // XXX - are we 100% sure that all !OK statuses do not write a document?
-            StatusWith<DiskLoc> status = collection->insertDocument( normalInsert, true );
+            uassertStatusOK(exec->executePlan());
+            UpdateResult res = UpdateStage::makeUpdateResult(*exec, debug);
 
-            if ( !status.isOK() ) {
-                result->error = toWriteError( status.getStatus() );
-            }
-            else {
-                logOp( "i", insertNS.c_str(), normalInsert );
-                getDur().commitIfNeeded();
-                result->stats.n = 1;
-            }
-        }
-        catch ( const PageFaultException& ex ) {
-            // TODO: An actual data structure that's not an exception for this
-            result->fault = new PageFaultException( ex );
-        }
-        catch ( const DBException& ex ) {
-            result->error = toWriteError( ex.toStatus() );
-        }
-
-    }
-
-    /**
-     * Perform a single index insert into a collection.  Requires the index descriptor be
-     * preprocessed and the collection already has been created.
-     *
-     * Might fault or error, otherwise populates the result.
-     */
-    static void singleCreateIndex( const BatchItemRef& insertItem,
-                                   const BSONObj& normalIndexDesc,
-                                   Collection* collection,
-                                   WriteOpResult* result ) {
-
-        const string& indexNS = insertItem.getRequest()->getNS();
-
-        Lock::assertWriteLocked( indexNS );
-
-        try {
-
-            Status status = collection->getIndexCatalog()->createIndex( normalIndexDesc, true );
-
-            if ( status.code() == ErrorCodes::IndexAlreadyExists ) {
-                result->stats.n = 0;
-            }
-            else if ( !status.isOK() ) {
-                result->error = toWriteError( status );
-            }
-            else {
-                logOp( "i", indexNS.c_str(), normalIndexDesc );
-                result->stats.n = 1;
-            }
-        }
-        catch ( const PageFaultException& ex ) {
-            // TODO: An actual data structure that's not an exception for this
-            result->fault = new PageFaultException( ex );
-        }
-        catch ( const DBException& ex ) {
-            result->error = toWriteError( ex.toStatus() );
-        }
-    }
-
-    /**
-     * Perform an update operation, which might update multiple documents in the lock.  Dispatches
-     * to update code currently to do most of this.
-     *
-     * Might error, otherwise populates the result.
-     */
-    static void multiUpdate( const BatchItemRef& updateItem,
-                             WriteOpResult* result ) {
-
-        Lock::assertWriteLocked( updateItem.getRequest()->getNS() );
-
-        BSONObj queryObj = updateItem.getUpdate()->getQuery();
-        BSONObj updateObj = updateItem.getUpdate()->getUpdateExpr();
-        bool multi = updateItem.getUpdate()->getMulti();
-        bool upsert = updateItem.getUpdate()->getUpsert();
-
-        bool didInsert = false;
-        long long numMatched = 0;
-        long long numDocsModified = 0;
-        BSONObj resUpsertedID;
-
-        try {
-
-            const NamespaceString requestNs( updateItem.getRequest()->getNS() );
-            UpdateRequest request( requestNs );
-
-            request.setQuery( queryObj );
-            request.setUpdates( updateObj );
-            request.setUpsert( upsert );
-            request.setMulti( multi );
-            request.setUpdateOpLog();
-            // TODO(greg) We need to send if we are ignoring the shard version below,
-            // but for now yes
-            UpdateLifecycleImpl updateLifecycle( true, requestNs );
-            request.setLifecycle( &updateLifecycle );
-
-            UpdateResult res = update( request, &cc().curop()->debug() );
-
-            numDocsModified = res.numDocsModified;
-            numMatched = res.numMatched;
-            resUpsertedID = res.upserted;
+            const long long numDocsModified = res.numDocsModified;
+            const long long numMatched = res.numMatched;
+            const BSONObj resUpsertedID = res.upserted;
 
             // We have an _id from an insert
-            didInsert = !resUpsertedID.isEmpty();
+            const bool didInsert = !resUpsertedID.isEmpty();
 
-            result->stats.nModified = didInsert ? 0 : numDocsModified;
-            result->stats.n = didInsert ? 1 : numMatched;
-            result->stats.upsertedID = resUpsertedID;
-        }
-        catch ( const DBException& ex ) {
-            result->error = toWriteError( ex.toStatus() );
+            result->getStats().nModified = didInsert ? 0 : numDocsModified;
+            result->getStats().n = didInsert ? 1 : numMatched;
+            result->getStats().upsertedID = resUpsertedID;
+        } catch (const WriteConflictException& dle) {
+            debug->writeConflicts++;
+            if (isMulti) {
+                log() << "Had WriteConflict during multi update, aborting";
+                throw;
+            }
+
+            createCollection = false;
+            // RESTART LOOP
+            fakeLoop = -1;
+            txn->recoveryUnit()->abandonSnapshot();
+
+            WriteConflictException::logAndBackoff(attempt++, "update", nsString.ns());
+        } catch (const StaleConfigException& staleExcep) {
+            result->setError(new WriteErrorDetail);
+            result->getError()->setErrCode(ErrorCodes::StaleShardVersion);
+            buildStaleError(
+                staleExcep.getVersionReceived(), staleExcep.getVersionWanted(), result->getError());
+        } catch (const DBException& ex) {
+            Status status = ex.toStatus();
+            if (ErrorCodes::isInterruption(status.code())) {
+                throw;
+            }
+            result->setError(toWriteError(status));
         }
     }
+}
 
-    /**
-     * Perform a remove operation, which might remove multiple documents.  Dispatches to remove code
-     * currently to do most of this.
-     *
-     * Might fault or error, otherwise populates the result.
-     */
-    static void multiRemove( const BatchItemRef& removeItem,
-                             WriteOpResult* result ) {
+/**
+ * Perform a remove operation, which might remove multiple documents.  Dispatches to remove code
+ * currently to do most of this.
+ *
+ * Might fault or error, otherwise populates the result.
+ */
+static void multiRemove(OperationContext* txn,
+                        const BatchItemRef& removeItem,
+                        WriteOpResult* result) {
+    const NamespaceString& nss = removeItem.getRequest()->getNS();
+    DeleteRequest request(nss);
+    request.setQuery(removeItem.getDelete()->getQuery());
+    request.setMulti(removeItem.getDelete()->getLimit() != 1);
+    request.setGod(false);
 
-        Lock::assertWriteLocked( removeItem.getRequest()->getNS() );
+    // Deletes running through the write commands path can yield.
+    request.setYieldPolicy(PlanExecutor::YIELD_AUTO);
 
+    int attempt = 1;
+    while (1) {
         try {
-            long long n = deleteObjects( removeItem.getRequest()->getNS(),
-                                         removeItem.getDelete()->getQuery(),
-                                         removeItem.getDelete()->getLimit() == 1, // justOne
-                                         true, // logOp
-                                         false // god
-                                         );
+            ParsedDelete parsedDelete(txn, &request);
+            Status status = parsedDelete.parseRequest();
+            if (!status.isOK()) {
+                result->setError(toWriteError(status));
+                return;
+            }
 
-            result->stats.n = n;
-        }
-        catch ( const PageFaultException& ex ) {
-            // TODO: An actual data structure that's not an exception for this
-            result->fault = new PageFaultException( ex );
-        }
-        catch ( const DBException& ex ) {
-            result->error = toWriteError( ex.toStatus() );
+            ScopedTransaction scopedXact(txn, MODE_IX);
+            AutoGetDb autoDb(txn, nss.db(), MODE_IX);
+            if (!autoDb.getDb()) {
+                break;
+            }
+
+            CurOp::get(txn)->raiseDbProfileLevel(autoDb.getDb()->getProfilingLevel());
+            Lock::CollectionLock collLock(
+                txn->lockState(), nss.ns(), parsedDelete.isIsolated() ? MODE_X : MODE_IX);
+
+            // getExecutorDelete() also checks if writes are allowed.
+            if (!checkIsMasterForDatabase(nss, result)) {
+                return;
+            }
+            // Check version once we're locked
+
+            if (!checkShardVersion(txn, *removeItem.getRequest(), result)) {
+                // Version error
+                return;
+            }
+
+            std::unique_ptr<PlanExecutor> exec = uassertStatusOK(
+                getExecutorDelete(txn, autoDb.getDb()->getCollection(nss), &parsedDelete));
+
+            // Execute the delete and retrieve the number deleted.
+            uassertStatusOK(exec->executePlan());
+            result->getStats().n = DeleteStage::getNumDeleted(*exec);
+
+            break;
+        } catch (const WriteConflictException& dle) {
+            CurOp::get(txn)->debug().writeConflicts++;
+            WriteConflictException::logAndBackoff(attempt++, "delete", nss.ns());
+        } catch (const StaleConfigException& staleExcep) {
+            result->setError(new WriteErrorDetail);
+            result->getError()->setErrCode(ErrorCodes::StaleShardVersion);
+            buildStaleError(
+                staleExcep.getVersionReceived(), staleExcep.getVersionWanted(), result->getError());
+            return;
+        } catch (const DBException& ex) {
+            Status status = ex.toStatus();
+            if (ErrorCodes::isInterruption(status.code())) {
+                throw;
+            }
+            result->setError(toWriteError(status));
+            return;
         }
     }
+}
 
-} // namespace mongo
+}  // namespace mongo

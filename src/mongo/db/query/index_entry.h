@@ -32,103 +32,91 @@
 
 #include "mongo/db/index_names.h"
 #include "mongo/db/jsobj.h"
+#include "mongo/util/mongoutils/str.h"
 
 namespace mongo {
 
+class MatchExpression;
+
+/**
+ * This name sucks, but every name involving 'index' is used somewhere.
+ */
+struct IndexEntry {
     /**
-     * We need to know what 'type' an index is in order to plan correctly.
-     * Rather than look this up repeatedly we figure it out once.
+     * Use this constructor if you're making an IndexEntry from the catalog.
      */
-    enum IndexType {
-        INDEX_BTREE,
-        INDEX_2D,
-        INDEX_HAYSTACK,
-        INDEX_2DSPHERE,
-        INDEX_TEXT,
-        INDEX_HASHED,
-    };
+    IndexEntry(const BSONObj& kp,
+               const std::string& accessMethod,
+               bool mk,
+               bool sp,
+               bool unq,
+               const std::string& n,
+               const MatchExpression* fe,
+               const BSONObj& io)
+        : keyPattern(kp),
+          multikey(mk),
+          sparse(sp),
+          unique(unq),
+          name(n),
+          filterExpr(fe),
+          infoObj(io) {
+        type = IndexNames::nameToType(accessMethod);
+    }
 
     /**
-     * This name sucks, but every name involving 'index' is used somewhere.
+     * For testing purposes only.
      */
-    struct IndexEntry {
-        IndexEntry(const BSONObj& kp,
-                   bool mk = false,
-                   bool sp = false,
-                   const string& n = "default_name",
-                   const BSONObj& io = BSONObj())
-            : keyPattern(kp),
-              multikey(mk),
-              sparse(sp),
-              name(n),
-              infoObj(io) {
+    IndexEntry(const BSONObj& kp,
+               bool mk,
+               bool sp,
+               bool unq,
+               const std::string& n,
+               const MatchExpression* fe,
+               const BSONObj& io)
+        : keyPattern(kp),
+          multikey(mk),
+          sparse(sp),
+          unique(unq),
+          name(n),
+          filterExpr(fe),
+          infoObj(io) {
+        type = IndexNames::nameToType(IndexNames::findPluginName(keyPattern));
+    }
 
-            // XXX: This is the wrong way to set this and this is dangerous.  We need to check in
-            // the catalog to see if we should override the plugin name instead of just grabbing it
-            // directly from the key pattern.  Move this a level higher to wherever IndexEntry is
-            // created.
-            //
-            // An example of the Bad Thing That We Must Avoid:
-            // 1. Create a 2dsphere index in 2.4, insert some docs.
-            // 2. Downgrade to 2.2.  Insert some more docs into the collection w/the 2dsphere
-            //    index.  2.2 treats the index as a normal btree index and creates keys accordingly.
-            // 3. Using the 2dsphere index in 2.4 gives wrong results or assert-fails or crashes as
-            //    the data isn't what we expect.
-            string typeStr = IndexNames::findPluginName(keyPattern);
+    /**
+     * For testing purposes only.
+     */
+    IndexEntry(const BSONObj& kp)
+        : keyPattern(kp),
+          multikey(false),
+          sparse(false),
+          unique(false),
+          name("test_foo"),
+          filterExpr(nullptr),
+          infoObj(BSONObj()) {
+        type = IndexNames::nameToType(IndexNames::findPluginName(keyPattern));
+    }
 
-            if (IndexNames::GEO_2D == typeStr) {
-                type = INDEX_2D;
-            }
-            else if (IndexNames::GEO_HAYSTACK == typeStr) {
-                type = INDEX_HAYSTACK;
-            }
-            else if (IndexNames::GEO_2DSPHERE == typeStr) {
-                type = INDEX_2DSPHERE;
-            }
-            else if (IndexNames::TEXT == typeStr) {
-                type = INDEX_TEXT;
-            }
-            else if (IndexNames::HASHED == typeStr) {
-                type = INDEX_HASHED;
-            }
-            else {
-                type = INDEX_BTREE;
-            }
-        }
+    BSONObj keyPattern;
 
-        BSONObj keyPattern;
+    bool multikey;
 
-        bool multikey;
+    bool sparse;
 
-        bool sparse;
+    bool unique;
 
-        string name;
+    std::string name;
 
-        // Geo indices have extra parameters.  We need those available to plan correctly.
-        BSONObj infoObj;
+    const MatchExpression* filterExpr;
 
-        // What type of index is this?  (What access method can we use on the index described
-        // by the keyPattern?)
-        IndexType type;
+    // Geo indices have extra parameters.  We need those available to plan correctly.
+    BSONObj infoObj;
 
-        std::string toString() const {
-            mongoutils::str::stream ss;
-            ss << "kp: "  << keyPattern.toString();
+    // What type of index is this?  (What access method can we use on the index described
+    // by the keyPattern?)
+    IndexType type;
 
-            if (multikey) {
-                ss << " multikey";
-            }
-
-            if (sparse) {
-                ss << " sparse";
-            }
-
-            if (!infoObj.isEmpty()) {
-                ss << " io: " << infoObj.toString();
-            }
-
-            return ss;
-        }
-    };
+    std::string toString() const;
+};
 
 }  // namespace mongo

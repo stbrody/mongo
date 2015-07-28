@@ -28,115 +28,100 @@
 
 #pragma once
 
-#include <boost/scoped_ptr.hpp>
 
 #include <map>
 #include <string>
 
 #include "mongo/base/disallow_copying.h"
-#include "mongo/bson/optime.h"
+#include "mongo/bson/timestamp.h"
 #include "mongo/s/ns_targeter.h"
-#include "mongo/s/multi_command_dispatch.h"
 #include "mongo/s/shard_resolver.h"
 #include "mongo/s/write_ops/batched_command_request.h"
 #include "mongo/s/write_ops/batched_command_response.h"
 
 namespace mongo {
 
-    class BatchWriteExecStats;
+class BatchWriteExecStats;
+class MultiCommandDispatch;
+
+/**
+ * The BatchWriteExec is able to execute client batch write requests, resulting in a batch
+ * response to send back to the client.
+ *
+ * There are two main interfaces the exec uses to "run" the batch:
+ *
+ *  - the "targeter" used to generate child batch operations to send to particular shards
+ *
+ *  - the "dispatcher" used to send child batches to several shards at once, and retrieve the
+ *    results
+ *
+ * Both the targeter and dispatcher are assumed to be dedicated to this particular
+ * BatchWriteExec instance.
+ *
+ */
+class BatchWriteExec {
+    MONGO_DISALLOW_COPYING(BatchWriteExec);
+
+public:
+    BatchWriteExec(NSTargeter* targeter, ShardResolver* resolver, MultiCommandDispatch* dispatcher);
 
     /**
-     * The BatchWriteExec is able to execute client batch write requests, resulting in a batch
-     * response to send back to the client.
+     * Executes a client batch write request by sending child batches to several shard
+     * endpoints, and returns a client batch write response.
      *
-     * There are two main interfaces the exec uses to "run" the batch:
-     *
-     *  - the "targeter" used to generate child batch operations to send to particular shards
-     *
-     *  - the "dispatcher" used to send child batches to several shards at once, and retrieve the
-     *    results
-     *
-     * Both the targeter and dispatcher are assumed to be dedicated to this particular
-     * BatchWriteExec instance.
-     *
+     * This function does not throw, any errors are reported via the clientResponse.
      */
-    class BatchWriteExec {
-    MONGO_DISALLOW_COPYING (BatchWriteExec);
-    public:
+    void executeBatch(const BatchedCommandRequest& clientRequest,
+                      BatchedCommandResponse* clientResponse);
 
-        BatchWriteExec( NSTargeter* targeter,
-                        ShardResolver* resolver,
-                        MultiCommandDispatch* dispatcher );
+    const BatchWriteExecStats& getStats();
 
-        /**
-         * Executes a client batch write request by sending child batches to several shard
-         * endpoints, and returns a client batch write response.
-         *
-         * This function does not throw, any errors are reported via the clientResponse.
-         */
-        void executeBatch( const BatchedCommandRequest& clientRequest,
-                           BatchedCommandResponse* clientResponse );
+    BatchWriteExecStats* releaseStats();
 
-        const BatchWriteExecStats& getStats();
+private:
+    // Not owned here
+    NSTargeter* _targeter;
 
-        BatchWriteExecStats* releaseStats();
+    // Not owned here
+    ShardResolver* _resolver;
 
-    private:
+    // Not owned here
+    MultiCommandDispatch* _dispatcher;
 
-        // Not owned here
-        NSTargeter* _targeter;
+    // Stats
+    std::unique_ptr<BatchWriteExecStats> _stats;
+};
 
-        // Not owned here
-        ShardResolver* _resolver;
+struct HostOpTime {
+    HostOpTime(Timestamp ot, OID e) : opTime(ot), electionId(e){};
+    HostOpTime(){};
+    Timestamp opTime;
+    OID electionId;
+};
 
-        // Not owned here
-        MultiCommandDispatch* _dispatcher;
+typedef std::map<ConnectionString, HostOpTime> HostOpTimeMap;
 
-        // Stats
-        auto_ptr<BatchWriteExecStats> _stats;
-    };
+class BatchWriteExecStats {
+public:
+    BatchWriteExecStats()
+        : numRounds(0), numTargetErrors(0), numResolveErrors(0), numStaleBatches(0) {}
 
-    // Useful comparator for using connection strings in ordered sets and maps
-    struct ConnectionStringComp {
-        bool operator()( const ConnectionString& connStrA,
-                         const ConnectionString& connStrB ) const {
-            return connStrA.toString().compare( connStrB.toString() ) < 0;
-        }
-    };
+    void noteWriteAt(const ConnectionString& host, Timestamp opTime, const OID& electionId);
 
-    struct HostOpTime {
-        HostOpTime(OpTime ot, OID e) : opTime(ot), electionId(e) {};
-        HostOpTime() {};
-        OpTime opTime;
-        OID electionId;
-    };
+    const HostOpTimeMap& getWriteOpTimes() const;
 
-    typedef std::map<ConnectionString, HostOpTime, ConnectionStringComp> HostOpTimeMap;
+    // Expose via helpers if this gets more complex
 
-    class BatchWriteExecStats {
-    public:
+    // Number of round trips required for the batch
+    int numRounds;
+    // Number of times targeting failed
+    int numTargetErrors;
+    // Number of times host resolution failed
+    int numResolveErrors;
+    // Number of stale batches
+    int numStaleBatches;
 
-        BatchWriteExecStats() :
-           numRounds( 0 ), numTargetErrors( 0 ), numResolveErrors( 0 ), numStaleBatches( 0 ) {
-        }
-
-        void noteWriteAt(const ConnectionString& host, OpTime opTime, const OID& electionId);
-
-        const HostOpTimeMap& getWriteOpTimes() const;
-
-        // Expose via helpers if this gets more complex
-
-        // Number of round trips required for the batch
-        int numRounds;
-        // Number of times targeting failed
-        int numTargetErrors;
-        // Number of times host resolution failed
-        int numResolveErrors;
-        // Number of stale batches
-        int numStaleBatches;
-
-    private:
-
-        HostOpTimeMap _writeOpTimes;
-    };
+private:
+    HostOpTimeMap _writeOpTimes;
+};
 }

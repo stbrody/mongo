@@ -29,10 +29,10 @@
 import sys
 from os.path import join, dirname, abspath
 root_dir = dirname(File('SConscript').rfile().abspath)
-sys.path.append(join(root_dir, 'tools'))
+sys.path.insert(0, join(root_dir, 'tools'))
 import js2c
 
-Import("env windows linux darwin solaris freebsd debugBuild")
+Import("env debugBuild")
 
 # pared-down copies of the equivalent structures in v8's SConstruct/SConscript:
 LIBRARY_FLAGS = {
@@ -78,7 +78,7 @@ LIBRARY_FLAGS = {
   'msvc': {
     'all': {
       'CPPDEFINES':   ['WIN32'],
-      'CCFLAGS':      ['/W3', '/WX', '/wd4351', '/wd4355', '/wd4800'],
+      'CCFLAGS':      ['/W3', '/WX', '/wd4312', '/wd4311', '/wd4302', '/wd4091', '/wd4351', '/wd4355', '/wd4800'],
     },
     'arch:ia32': {
       'CPPDEFINES':   ['V8_TARGET_ARCH_IA32', '_USE_32BIT_TIME_T', 'V8_NO_FAST_TLS'],
@@ -87,7 +87,7 @@ LIBRARY_FLAGS = {
       'CPPDEFINES':   ['V8_TARGET_ARCH_X64'],
     },
     'mode:debug': {
-      'CPPDEFINES':   ['_DEBUG', 'ENABLE_DISASSEMBLER', 'DEBUG'],
+      'CPPDEFINES':   ['ENABLE_DISASSEMBLER', 'DEBUG'],
     },
   }
 }
@@ -241,6 +241,7 @@ SOURCES = {
     x64/stub-cache-x64.cc
     """),
   'os:freebsd': ['platform-freebsd.cc', 'platform-posix.cc'],
+  'os:openbsd': ['platform-openbsd.cc', 'platform-posix.cc'],
   'os:linux':   ['platform-linux.cc', 'platform-posix.cc'],
   'os:macos':   ['platform-macos.cc', 'platform-posix.cc'],
   'os:solaris': ['platform-solaris.cc', 'platform-posix.cc'],
@@ -282,28 +283,26 @@ def get_flags(flag, toolchain, options):
     return ret
 
 def get_options():
-    processor = env['PROCESSOR_ARCHITECTURE']
+    processor = env['TARGET_ARCH']
     if processor == 'i386':
         arch_string = 'arch:ia32'
-    elif processor == 'i686':
-        arch_string = 'arch:ia32'
     elif processor == 'x86_64':
-        arch_string = 'arch:x64'
-    elif processor == 'amd64':
         arch_string = 'arch:x64'
     else:
         assert False, "Unsupported architecture: " + processor
 
-    if linux:
+    if env.TargetOSIs('linux'):
         os_string = 'os:linux'
-    elif darwin:
+    elif env.TargetOSIs('osx'):
         os_string = 'os:macos'
-    elif windows:
+    elif env.TargetOSIs('windows'):
         os_string = 'os:win32'
-    elif freebsd:
+    elif env.TargetOSIs('freebsd'):
         os_string = 'os:freebsd'
-    elif solaris:
+    elif env.TargetOSIs('solaris'):
         os_string = 'os:solaris'
+    elif env.TargetOSIs('openbsd'):
+        os_string = 'os:openbsd'
     else:
         os_string = 'os:nullos'
 
@@ -331,7 +330,7 @@ def get_sources(options):
     return sources
 
 def get_toolchain():
-    if windows:
+    if env.ToolchainIs('MSVC'):
         return 'msvc'
     else:
         return 'gcc'
@@ -351,8 +350,8 @@ env = env.Clone()
 # in addition, v8 source needs to compile with src/parser.h, which
 # is being placed here earlier in the search path than windows sdk's
 # Include/parser.h (v8 doesn't even use any of those header files)
-env['CPPPATH'].remove('$BUILD_DIR/third_party/v8/include')
-env.Prepend(CPPPATH='$BUILD_DIR/third_party/v8/src')
+env['CPPPATH'].remove('#/src/third_party/v8/include')
+env.Prepend(CPPPATH='#/src/third_party/v8/src')
 
 # add v8 ccflags and cppdefines to environment if they're not already
 # present
@@ -374,8 +373,11 @@ def removeIfPresent(lst, item):
     except ValueError:
         pass
 
-for to_remove in ['-Werror', '-Wall', '-W']:
+# NOTE: Along with the warning flags, remove any flags for LTO when building v8,
+# as LTO builds currently appear to generate bad code with clang.
+for to_remove in ['-Werror', '-Wall', '-W', "-flto"]:
     removeIfPresent(env['CCFLAGS'], to_remove)
+    removeIfPresent(env['LINKFLAGS'], to_remove)
 
 # specify rules for building libraries.cc and experimental-libraries.cc
 env['BUILDERS']['JS2C'] = Builder(action=js2c.JS2C)

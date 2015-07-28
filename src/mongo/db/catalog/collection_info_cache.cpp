@@ -28,72 +28,142 @@
 *    it in the license file.
 */
 
+#define MONGO_LOG_DEFAULT_COMPONENT ::mongo::logger::LogComponent::kStorage
+
+#include "mongo/platform/basic.h"
+
 #include "mongo/db/catalog/collection_info_cache.h"
 
-#include "mongo/db/d_concurrency.h"
-#include "mongo/db/structure/catalog/namespace_details.h"
-#include "mongo/db/structure/catalog/namespace_details-inl.h"
-#include "mongo/db/query/plan_cache.h"
 #include "mongo/db/catalog/collection.h"
+#include "mongo/db/concurrency/d_concurrency.h"
+#include "mongo/db/fts/fts_spec.h"
+#include "mongo/db/index/index_descriptor.h"
+#include "mongo/db/index_legacy.h"
+#include "mongo/db/query/plan_cache.h"
+#include "mongo/db/query/planner_ixselect.h"
 #include "mongo/util/debug_util.h"
-
-#include "mongo/db/structure/catalog/index_details.h" // XXX
-#include "mongo/db/pdfile.h" // XXX
+#include "mongo/util/log.h"
 
 namespace mongo {
 
-    CollectionInfoCache::CollectionInfoCache( Collection* collection )
-        : _collection( collection ),
-          _keysComputed( false ),
-          _planCache(new PlanCache(collection->ns().ns())),
-          _querySettings(new QuerySettings()) { }
+CollectionInfoCache::CollectionInfoCache(Collection* collection)
+    : _collection(collection),
+      _keysComputed(false),
+      _planCache(new PlanCache(collection->ns().ns())),
+      _querySettings(new QuerySettings()) {}
 
-    void CollectionInfoCache::reset() {
-        Lock::assertWriteLocked( _collection->ns().ns() );
-        LOG(1) << _collection->ns().ns() << ": clearing plan cache - collection info cache reset";
-        clearQueryCache();
-        _keysComputed = false;
-        // query settings is not affected by info cache reset.
-        // index filters should persist throughout life of collection
-    }
+void CollectionInfoCache::reset(OperationContext* txn) {
+    LOG(1) << _collection->ns().ns() << ": clearing plan cache - collection info cache reset";
+    clearQueryCache();
+    _keysComputed = false;
+    computeIndexKeys(txn);
+    updatePlanCacheIndexEntries(txn);
+    // query settings is not affected by info cache reset.
+    // index filters should persist throughout life of collection
+}
 
-    void CollectionInfoCache::computeIndexKeys() {
-        DEV Lock::assertWriteLocked( _collection->ns().ns() );
+const UpdateIndexData& CollectionInfoCache::indexKeys(OperationContext* txn) const {
+    // This requires "some" lock, and MODE_IS is an expression for that, for now.
+    dassert(txn->lockState()->isCollectionLockedForMode(_collection->ns().ns(), MODE_IS));
+    invariant(_keysComputed);
+    return _indexedPaths;
+}
 
-        _indexedPaths.clear();
+void CollectionInfoCache::computeIndexKeys(OperationContext* txn) {
+    // This function modified objects attached to the Collection so we need a write lock
+    invariant(txn->lockState()->isCollectionLockedForMode(_collection->ns().ns(), MODE_X));
+    _indexedPaths.clear();
 
-        NamespaceDetails::IndexIterator i = _collection->details()->ii( true );
-        while( i.more() ) {
-            BSONObj key = i.next().keyPattern();
-            BSONObjIterator j( key );
-            while ( j.more() ) {
+    IndexCatalog::IndexIterator i = _collection->getIndexCatalog()->getIndexIterator(txn, true);
+    while (i.more()) {
+        IndexDescriptor* descriptor = i.next();
+
+        if (descriptor->getAccessMethodName() != IndexNames::TEXT) {
+            BSONObj key = descriptor->keyPattern();
+            BSONObjIterator j(key);
+            while (j.more()) {
                 BSONElement e = j.next();
-                _indexedPaths.addPath( e.fieldName() );
+                _indexedPaths.addPath(e.fieldName());
+            }
+        } else {
+            fts::FTSSpec ftsSpec(descriptor->infoObj());
+
+            if (ftsSpec.wildcard()) {
+                _indexedPaths.allPathsIndexed();
+            } else {
+                for (size_t i = 0; i < ftsSpec.numExtraBefore(); ++i) {
+                    _indexedPaths.addPath(ftsSpec.extraBefore(i));
+                }
+                for (fts::Weights::const_iterator it = ftsSpec.weights().begin();
+                     it != ftsSpec.weights().end();
+                     ++it) {
+                    _indexedPaths.addPath(it->first);
+                }
+                for (size_t i = 0; i < ftsSpec.numExtraAfter(); ++i) {
+                    _indexedPaths.addPath(ftsSpec.extraAfter(i));
+                }
+                // Any update to a path containing "language" as a component could change the
+                // language of a subdocument.  Add the override field as a path component.
+                _indexedPaths.addPathComponent(ftsSpec.languageOverrideField());
             }
         }
 
-        _keysComputed = true;
-
-    }
-
-    void CollectionInfoCache::notifyOfWriteOp() {
-        if (NULL != _planCache.get()) {
-            _planCache->notifyOfWriteOp();
+        // handle partial indexes
+        const IndexCatalogEntry* entry = i.catalogEntry(descriptor);
+        const MatchExpression* filter = entry->getFilterExpression();
+        if (filter) {
+            unordered_set<std::string> paths;
+            QueryPlannerIXSelect::getFields(filter, "", &paths);
+            for (auto it = paths.begin(); it != paths.end(); ++it) {
+                _indexedPaths.addPath(*it);
+            }
         }
     }
 
-    void CollectionInfoCache::clearQueryCache() {
-        if (NULL != _planCache.get()) {
-            _planCache->clear();
-        }
+    _keysComputed = true;
+}
+
+void CollectionInfoCache::notifyOfWriteOp() {
+    if (NULL != _planCache.get()) {
+        _planCache->notifyOfWriteOp();
+    }
+}
+
+void CollectionInfoCache::clearQueryCache() {
+    if (NULL != _planCache.get()) {
+        _planCache->clear();
+    }
+}
+
+PlanCache* CollectionInfoCache::getPlanCache() const {
+    return _planCache.get();
+}
+
+QuerySettings* CollectionInfoCache::getQuerySettings() const {
+    return _querySettings.get();
+}
+
+void CollectionInfoCache::updatePlanCacheIndexEntries(OperationContext* txn) {
+    std::vector<IndexEntry> indexEntries;
+
+    // TODO We shouldn't need to include unfinished indexes, but we must here because the index
+    // catalog may be in an inconsistent state.  SERVER-18346.
+    const bool includeUnfinishedIndexes = true;
+    IndexCatalog::IndexIterator ii =
+        _collection->getIndexCatalog()->getIndexIterator(txn, includeUnfinishedIndexes);
+    while (ii.more()) {
+        const IndexDescriptor* desc = ii.next();
+        const IndexCatalogEntry* ice = ii.catalogEntry(desc);
+        indexEntries.emplace_back(desc->keyPattern(),
+                                  desc->getAccessMethodName(),
+                                  desc->isMultikey(txn),
+                                  desc->isSparse(),
+                                  desc->unique(),
+                                  desc->indexName(),
+                                  ice->getFilterExpression(),
+                                  desc->infoObj());
     }
 
-    PlanCache* CollectionInfoCache::getPlanCache() const {
-        return _planCache.get();
-    }
-
-    QuerySettings* CollectionInfoCache::getQuerySettings() const {
-        return _querySettings.get();
-    }
-
+    _planCache->notifyOfIndexEntries(indexEntries);
+}
 }

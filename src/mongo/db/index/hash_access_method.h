@@ -33,51 +33,31 @@
 #include "mongo/base/status.h"
 #include "mongo/db/hasher.h"  // For HashSeed.
 #include "mongo/db/index/index_descriptor.h"
-#include "mongo/db/index/btree_based_access_method.h"
+#include "mongo/db/index/index_access_method.h"
 #include "mongo/db/jsobj.h"
 
 namespace mongo {
 
-    /**
-     * This is the access method for "hashed" indices.
-     */
-    class HashAccessMethod : public BtreeBasedAccessMethod {
-    public:
-        using BtreeBasedAccessMethod::_descriptor;
+/**
+ * This is the access method for "hashed" indices.
+ */
+class HashAccessMethod : public IndexAccessMethod {
+public:
+    HashAccessMethod(IndexCatalogEntry* btreeState, SortedDataInterface* btree);
 
-        HashAccessMethod(IndexCatalogEntry* btreeState);
-        virtual ~HashAccessMethod() { }
+private:
+    virtual void getKeys(const BSONObj& obj, BSONObjSet* keys) const;
 
-        // This is a NO-OP.
-        virtual Status setOptions(const CursorOptions& options) {
-            return Status::OK();
-        }
+    // Only one of our fields is hashed.  This is the field name for it.
+    std::string _hashedField;
 
-        /**
-         * Hashing function used by both this class and the cursors we create.
-         * Exposed for testing and so mongo/db/index_legacy.cpp can use it.
-         */
-        static long long int makeSingleKey(const BSONElement& e, HashSeed seed, int v);
+    // _seed defaults to zero.
+    HashSeed _seed;
 
-        /**
-         * Exposed externally for testing purposes.
-         */
-        static void getKeysImpl(const BSONObj& obj, const string& hashedField, HashSeed seed,
-                                int hashVersion, bool isSparse, BSONObjSet* keys);
+    // _hashVersion defaults to zero.
+    int _hashVersion;
 
-    private:
-        virtual void getKeys(const BSONObj& obj, BSONObjSet* keys);
-
-        // Only one of our fields is hashed.  This is the field name for it.
-        string _hashedField;
-
-        // _seed defaults to zero.
-        HashSeed _seed;
-
-        // _hashVersion defaults to zero.
-        int _hashVersion;
-
-        BSONObj _missingKey;
-    };
+    BSONObj _missingKey;
+};
 
 }  // namespace mongo

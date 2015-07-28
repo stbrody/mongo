@@ -39,79 +39,74 @@
 
 namespace mongo {
 
-    struct StorageGlobalParams {
+struct StorageGlobalParams {
+    // Default data directory for mongod when running in non-config server mode.
+    static const char* kDefaultDbPath;
 
-        StorageGlobalParams() :
-#ifdef _WIN32
-            dbpath("\\data\\db\\"),
-#else
-            dbpath("/data/db/"),
-#endif
-            directoryperdb(false),
-            lenForNewNsFiles(16 * 1024 * 1024),
-            preallocj(true),
-            journalCommitInterval(0), // 0 means use default
-            quota(false), quotaFiles(8),
-            syncdelay(60),
-            useHints(true)
-        {
-            repairpath = dbpath;
-            dur = false;
-#if defined(_DURABLEDEFAULTON)
+    // Default data directory for mongod when running as the config database of
+    // a sharded cluster.
+    static const char* kDefaultConfigDbPath;
+
+    StorageGlobalParams()
+        : engine("wiredTiger"),
+          engineSetByUser(false),
+          dbpath(kDefaultDbPath),
+          upgrade(false),
+          repair(false),
+          noTableScan(false),
+          directoryperdb(false),
+          syncdelay(60.0) {
+        dur = false;
+        if (sizeof(void*) == 8)
             dur = true;
-#endif
-            if (sizeof(void*) == 8)
-                dur = true;
-#if defined(_DURABLEDEFAULTOFF)
-            dur = false;
-#endif
-        }
+    }
 
-        std::string dbpath;
-        bool directoryperdb;
-        std::string repairpath;
-        unsigned lenForNewNsFiles;
+    // --storageEngine
+    // storage engine for this instance of mongod.
+    std::string engine;
 
-        bool preallocj;        // --nopreallocj no preallocation of journal files
-        bool prealloc;         // --noprealloc no preallocation of data files
-        bool smallfiles;       // --smallfiles allocate smaller data files
-        bool noTableScan;      // --notablescan no table scans allowed
+    // True if --storageEngine was passed on the command line, and false otherwise.
+    bool engineSetByUser;
 
-        bool dur;                       // --dur durability (now --journal)
-        unsigned journalCommitInterval; // group/batch commit interval ms
+    // The directory where the mongod instance stores its data.
+    std::string dbpath;
 
-        /** --durOptions 7      dump journal and terminate without doing anything further
-            --durOptions 4      recover and terminate without listening
-        */
-        enum { // bits to be ORed
-            DurDumpJournal = 1,   // dump diagnostics on the journal during recovery
-            DurScanOnly = 2,      // don't do any real work, just scan and dump if dump specified
-            DurRecoverOnly = 4,   // terminate after recovery step
-            DurParanoid = 8,      // paranoid mode enables extra checks
-            DurAlwaysCommit = 16, // do a group commit every time the writelock is released
-            DurAlwaysRemap = 32,  // remap the private view after every group commit (may lag to the
-                                  // next write lock acquisition, but will do all files then)
-            DurNoCheckSpace = 64  // don't check that there is enough room for journal files before
-                                  // startup (for diskfull tests)
-        };
-        int durOptions;          // --durOptions <n> for debugging
+    // --upgrade
+    // Upgrades the on-disk data format of the files specified by the --dbpath to the
+    // latest version, if needed.
+    bool upgrade;
 
-        bool quota;            // --quota
-        int quotaFiles;        // --quotaFiles
+    // --repair
+    // Runs a repair routine on all databases. This is equivalent to shutting down and
+    // running the repairDatabase database command on all databases.
+    bool repair;
 
-        double syncdelay;      // seconds between fsyncs
+    // --repairpath
+    // Specifies the root directory containing MongoDB data files to use for the --repair
+    // operation.
+    // Default: A _tmp directory within the path specified by the dbPath option.
+    std::string repairpath;
 
-        bool useHints;         // only off if --nohints
-    };
+    bool dur;  // --dur durability (now --journal)
 
-    extern StorageGlobalParams storageGlobalParams;
+    // --notablescan
+    // no table scans allowed
+    bool noTableScan;
 
-    bool isJournalingEnabled();
-    void setJournalCommitInterval(unsigned newValue);
-    unsigned getJournalCommitInterval();
+    // --directoryperdb
+    // Stores each database’s files in its own folder in the data directory.
+    // When applied to an existing system, the directoryPerDB option alters
+    // the storage pattern of the data directory.
+    bool directoryperdb;
 
-    // This is not really related to persistence, but mongos and the other executables share code
-    // and we use this function to determine at runtime which executable we are in.
-    bool isMongos();
+    // --syncdelay
+    // Controls how much time can pass before MongoDB flushes data to the data files
+    // via an fsync operation.
+    // Do not set this value on production systems.
+    // In almost every situation, you should use the default setting.
+    double syncdelay;  // seconds between fsyncs
+};
 
-} // namespace mongo
+extern StorageGlobalParams storageGlobalParams;
+
+}  // namespace mongo

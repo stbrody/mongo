@@ -83,8 +83,6 @@ m0.getDB("db1").createRole({
     ]
 });
 
-delete m0;
-
 //
 // Add a second node to the set, and add a third role, dependent on the first two.
 //
@@ -129,7 +127,7 @@ rstest.nodes.forEach(function (node) {
 // Verify that dropping roles propagates.
 rstest.getMaster().getDB("db1").dropRole("r2", { w: 2});
 rstest.nodes.forEach(function (node) {
-    assert.throws(function() { node.getDB("db1").getRole("r2") }, [], node);
+    assert.eq(null, node.getDB("db1").getRole("r2"));
     var role = node.getDB("db1").getRole("r3");
     assert.eq(1, role.roles.length, node);
     assertListContainsRole(role.roles, {role: "r1", db: "db1"}, node);
@@ -149,6 +147,11 @@ rstest.nodes.forEach(function (node) {
 // Verify that applyOps commands propagate.
 // NOTE: This section of the test depends on the oplog and roles schemas.
 assert.commandWorked(rstest.getMaster().getDB("admin").runCommand({ applyOps: [
+    {
+        op: "c",
+        ns: "admin.$cmd",
+        o: { create: "system.roles" }
+    },
     {
         op: "i",
         ns: "admin.system.roles",
@@ -175,6 +178,11 @@ assert.commandWorked(rstest.getMaster().getDB("admin").runCommand({ applyOps: [
         op: "c",
         ns: "admin.$cmd",
         o: { dropDatabase: 1 }
+    },
+    {
+        op: "c",
+        ns: "admin.$cmd",
+        o: { create: "system.roles" }
     },
     {
         op: "i",

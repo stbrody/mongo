@@ -66,10 +66,12 @@ function test(db, sharded, indexType) {
 
     // insert points
     var numPts = 10*1000;
+    var bulk = db[coll].initializeUnorderedBulkOp();
     for (var i=0; i < numPts; i++) {
-        db[coll].insert({rand:Math.random(), loc: pointMaker.mkPt()});
+        bulk.insert({ rand: Math.random(), loc: pointMaker.mkPt() });
     }
-    db.getLastError();
+    assert.writeOK(bulk.execute());
+
     assert.eq(db[coll].count(), numPts);
 
     db[coll].ensureIndex({loc: indexType});
@@ -121,7 +123,7 @@ test(db, false, '2dsphere');
 var sharded = new ShardingTest({shards: 3, verbose: 0, mongos: 1});
 sharded.stopBalancer();
 sharded.adminCommand( { enablesharding : "test" } );
-
+sharded.ensurePrimaryShard('test', 'shard0001');
 test(sharded.getDB('test'), true, '2d');
 test(sharded.getDB('test'), true, '2dsphere');
 

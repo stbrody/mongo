@@ -8,8 +8,7 @@
 
 var s = new ShardingTest({shards: 2,
                           mongos: 1,
-                          verbose:1,
-                          other: {separateConfig: true}});
+                          verbose:1});
 var db = s.getDB("test");   // db variable name is required due to startParallelShell()
 var numDocs = 10000;
 db.foo.drop();
@@ -19,6 +18,7 @@ s.stopBalancer()
 
 // shard test.foo and add a split point
 s.adminCommand({enablesharding: "test"});
+s.ensurePrimaryShard('test', 'shard0001');
 s.adminCommand({shardcollection : "test.foo", key: {_id: 1}});
 s.adminCommand({split : "test.foo", middle: {_id: numDocs/2}});
 
@@ -30,10 +30,11 @@ s.adminCommand({moveChunk: "test.foo", find: {_id: 3},
 s.setBalancer(true)
 
 // insert 10k small documents into the sharded collection
+var bulk = db.foo.initializeUnorderedBulkOp();
 for (i = 0; i < numDocs; i++)
-    db.foo.insert({_id: i});
+    bulk.insert({ _id: i });
+assert.writeOK(bulk.execute());
 
-db.getLastError();
 var x = db.foo.stats();
 
 // verify the colleciton has been sharded and documents are evenly distributed
@@ -43,7 +44,6 @@ assert.eq(numDocs, x.count, "total count");
 assert.eq(numDocs / 2, x.shards.shard0000.count, "count on shard0000");
 assert.eq(numDocs / 2, x.shards.shard0001.count, "count on shard0001");
 assert(x.totalIndexSize > 0);
-assert(x.numExtents > 0);
 
 // insert one doc into a non-sharded collection
 db.bar.insert({x: 1});
@@ -59,20 +59,14 @@ var start = new Date();
 // solution is to increase sleep time
 var whereKillSleepTime = 10000;
 var parallelCommand =
-    "try { " +
-    "    db.foo.find(function(){ " +
-    "        sleep( " + whereKillSleepTime + " ); " +
-    "        return false; " +
-    "     }).itcount(); " +
-    "} " +
-    "catch(e) { " +
-    "    print('PShell execution ended:'); " +
-    "    printjson(e) " +
-    "}";
+    "db.foo.find(function() { " +
+    "    sleep( " + whereKillSleepTime + " ); " +
+    "    return false; " +
+    "}).itcount(); ";
 
 // fork a parallel shell, but do not wait for it to start
 print("about to fork new shell at: " + Date());
-join = startParallelShell(parallelCommand);
+var awaitShell = startParallelShell(parallelCommand);
 print("done forking shell at: " + Date());
 
 // Get all current $where operations
@@ -133,7 +127,9 @@ print("time if run full: " + (numDocs * whereKillSleepTime));
 assert.gt(whereKillSleepTime * numDocs / 20, killTime, "took too long to kill");
 
 // wait for the parallel shell we spawned to complete
-join();
+var exitCode = awaitShell({checkExitSuccess: false});
+assert.neq(0, exitCode, "expected shell to exit abnormally due to JS execution being terminated");
+
 var end = new Date();
 print("elapsed: " + (end.getTime() - start.getTime()));
 
@@ -145,33 +141,13 @@ assert(x.code == 13,
 
 // test fsync on admin db
 x = db._adminCommand("fsync");
-assert(x.ok == 1 && x.numFiles > 0, "fsync failed: " + tojson(x));
+assert(x.ok == 1, "fsync failed: " + tojson(x));
+if ( x.all.shard0000 > 0 ) {
+    assert(x.numFiles > 0, "fsync failed: " + tojson(x));
+}
 
 // test fsync+lock on admin db
 x = db._adminCommand({"fsync" :1, lock:true});
 assert(!x.ok, "lock should fail: " + tojson(x));
-
-// write back stuff
-// SERVER-4194
-
-function countWritebacks(curop) {
-    print("---------------");
-    var num = 0;
-    for (var i = 0; i < curop.inprog.length; i++) {
-        var q = curop.inprog[i].query;
-        if (q && q.writebacklisten) {
-            printjson(curop.inprog[i]);
-            num++;
-        }
-    }
-    return num;
-}
-
-x = db.currentOp();
-assert.eq(0, countWritebacks(x), "without all");
-
-x = db.currentOp(true);
-y = countWritebacks(x);
-assert(y == 1 || y == 2, "with all: " + y);
 
 s.stop()

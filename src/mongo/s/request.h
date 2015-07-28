@@ -30,72 +30,62 @@
 
 #pragma once
 
-#include "mongo/pch.h"
-
 #include "mongo/db/dbmessage.h"
-#include "mongo/s/config.h"
 #include "mongo/util/net/message.h"
 
 namespace mongo {
 
+class Client;
 
-    class OpCounters;
-    class ClientInfo;
+class Request {
+    MONGO_DISALLOW_COPYING(Request);
 
-    class Request : boost::noncopyable {
-    public:
-        Request( Message& m, AbstractMessagingPort* p );
+public:
+    Request(Message& m, AbstractMessagingPort* p);
 
-        // ---- message info -----
+    const char* getns() const {
+        return _d.getns();
+    }
 
+    int op() const {
+        return _m.operation();
+    }
 
-        const char * getns() const {
-            return _d.getns();
-        }
-        int op() const {
-            return _m.operation();
-        }
-        bool expectResponse() const {
-            return op() == dbQuery || op() == dbGetMore;
-        }
-        bool isCommand() const;
+    bool expectResponse() const {
+        return op() == dbQuery || op() == dbGetMore;
+    }
 
-        MSGID id() const {
-            return _id;
-        }
+    bool isCommand() const;
 
-        ClientInfo * getClientInfo() const {
-            return _clientInfo;
-        }
+    MSGID id() const {
+        return _id;
+    }
 
-        // ---- low level access ----
+    void reply(Message& response, const std::string& fromServer);
 
-        void reply( Message & response , const string& fromServer );
+    Message& m() {
+        return _m;
+    }
+    DbMessage& d() {
+        return _d;
+    }
+    AbstractMessagingPort* p() const {
+        return _p;
+    }
 
-        Message& m() { return _m; }
-        DbMessage& d() { return _d; }
-        AbstractMessagingPort* p() const { return _p; }
+    void process(int attempt = 0);
 
-        void process( int attempt = 0 );
+    void init();
 
-        void init();
+private:
+    Client* const _clientInfo;
 
-        void reset();
+    Message& _m;
+    DbMessage _d;
+    AbstractMessagingPort* const _p;
 
-    private:
-        Message& _m;
-        DbMessage _d;
-        AbstractMessagingPort* _p;
+    MSGID _id;
 
-        MSGID _id;
-
-        ClientInfo * _clientInfo;
-
-        OpCounters* _counter;
-
-        bool _didInit;
-    };
-
+    bool _didInit;
+};
 }
-
-#include "strategy.h"

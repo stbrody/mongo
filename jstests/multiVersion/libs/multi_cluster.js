@@ -2,6 +2,19 @@
 // MultiVersion utility functions for clusters
 //
 
+/**
+ * Restarts the specified binaries in options to the binVersion. Note: this does not
+ * perform any upgrade operations.
+ *
+ * @param binVersion {string}
+ * @param options {Object} format:
+ *
+ * {
+ *     upgradeShards: <bool>, // defaults to true
+ *     upgradeConfigs: <bool>, // defaults to true
+ *     upgradeMongos: <bool>, // defaults to true
+ * }
+ */
 ShardingTest.prototype.upgradeCluster = function( binVersion, options ){
     
     options = options || {}
@@ -47,7 +60,7 @@ ShardingTest.prototype.upgradeCluster = function( binVersion, options ){
                 // Upgrade replica set
                 var rst = this._rs[i].test
                 
-                rst.upgradeSet( binVersion )
+                rst.upgradeSet({ binVersion: binVersion });
             }
             else {
                 

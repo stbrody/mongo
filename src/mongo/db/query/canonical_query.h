@@ -28,6 +28,7 @@
 
 #pragma once
 
+
 #include "mongo/base/status.h"
 #include "mongo/db/dbmessage.h"
 #include "mongo/db/jsobj.h"
@@ -37,116 +38,193 @@
 
 namespace mongo {
 
-    // TODO: Is this binary data really?
-    typedef std::string PlanCacheKey;
+class CanonicalQuery {
+public:
+    /**
+     * If parsing succeeds, returns a std::unique_ptr<CanonicalQuery> representing the parsed
+     * query (which will never be NULL).  If parsing fails, returns an error Status.
+     *
+     * Used for legacy find through the OP_QUERY message.
+     */
+    static StatusWith<std::unique_ptr<CanonicalQuery>> canonicalize(
+        const QueryMessage& qm,
+        const MatchExpressionParser::WhereCallback& whereCallback =
+            MatchExpressionParser::WhereCallback());
 
-    class CanonicalQuery {
-    public:
-        static Status canonicalize(const QueryMessage& qm, CanonicalQuery** out);
+    /**
+     * Takes ownership of 'lpq'.
+     *
+     * If parsing succeeds, returns a std::unique_ptr<CanonicalQuery> representing the parsed
+     * query (which will never be NULL).  If parsing fails, returns an error Status.
+     *
+     * Used for finds using the find command path.
+     */
+    static StatusWith<std::unique_ptr<CanonicalQuery>> canonicalize(
+        LiteParsedQuery* lpq,
+        const MatchExpressionParser::WhereCallback& whereCallback =
+            MatchExpressionParser::WhereCallback());
 
-        /**
-         * For testing or for internal clients to use.
-         */
-        static Status canonicalize(const string& ns, const BSONObj& query, CanonicalQuery** out);
+    /**
+     * For testing or for internal clients to use.
+     */
 
-        static Status canonicalize(const string& ns, const BSONObj& query, long long skip,
-                                   long long limit, CanonicalQuery** out);
+    /**
+     * Used for creating sub-queries from an existing CanonicalQuery.
+     *
+     * 'root' must be an expression in baseQuery.root().
+     *
+     * Does not take ownership of 'root'.
+     */
+    static StatusWith<std::unique_ptr<CanonicalQuery>> canonicalize(
+        const CanonicalQuery& baseQuery,
+        MatchExpression* root,
+        const MatchExpressionParser::WhereCallback& whereCallback =
+            MatchExpressionParser::WhereCallback());
 
-        static Status canonicalize(const string& ns, const BSONObj& query, const BSONObj& sort,
-                                   const BSONObj& proj, CanonicalQuery** out);
+    static StatusWith<std::unique_ptr<CanonicalQuery>> canonicalize(
+        const std::string& ns,
+        const BSONObj& query,
+        const MatchExpressionParser::WhereCallback& whereCallback =
+            MatchExpressionParser::WhereCallback());
 
-        static Status canonicalize(const string& ns, const BSONObj& query, const BSONObj& sort,
-                                   const BSONObj& proj,
-                                   long long skip, long long limit,
-                                   CanonicalQuery** out);
+    static StatusWith<std::unique_ptr<CanonicalQuery>> canonicalize(
+        const std::string& ns,
+        const BSONObj& query,
+        bool explain,
+        const MatchExpressionParser::WhereCallback& whereCallback =
+            MatchExpressionParser::WhereCallback());
 
-        static Status canonicalize(const string& ns, const BSONObj& query, const BSONObj& sort,
-                                   const BSONObj& proj,
-                                   long long skip, long long limit,
-                                   const BSONObj& hint,
-                                   CanonicalQuery** out);
+    static StatusWith<std::unique_ptr<CanonicalQuery>> canonicalize(
+        const std::string& ns,
+        const BSONObj& query,
+        long long skip,
+        long long limit,
+        const MatchExpressionParser::WhereCallback& whereCallback =
+            MatchExpressionParser::WhereCallback());
 
-        static Status canonicalize(const string& ns, const BSONObj& query, const BSONObj& sort,
-                                   const BSONObj& proj,
-                                   long long skip, long long limit,
-                                   const BSONObj& hint,
-                                   const BSONObj& minObj, const BSONObj& maxObj,
-                                   bool snapshot, CanonicalQuery** out);
+    static StatusWith<std::unique_ptr<CanonicalQuery>> canonicalize(
+        const std::string& ns,
+        const BSONObj& query,
+        const BSONObj& sort,
+        const BSONObj& proj,
+        const MatchExpressionParser::WhereCallback& whereCallback =
+            MatchExpressionParser::WhereCallback());
 
-        /**
-         * Returns true if "query" describes an exact-match query on _id, possibly with
-         * the $isolated/$atomic modifier.
-         */
-        static bool isSimpleIdQuery(const BSONObj& query);
+    static StatusWith<std::unique_ptr<CanonicalQuery>> canonicalize(
+        const std::string& ns,
+        const BSONObj& query,
+        const BSONObj& sort,
+        const BSONObj& proj,
+        long long skip,
+        long long limit,
+        const MatchExpressionParser::WhereCallback& whereCallback =
+            MatchExpressionParser::WhereCallback());
 
-        // What namespace is this query over?
-        const string& ns() const { return _pq->ns(); }
+    static StatusWith<std::unique_ptr<CanonicalQuery>> canonicalize(
+        const std::string& ns,
+        const BSONObj& query,
+        const BSONObj& sort,
+        const BSONObj& proj,
+        long long skip,
+        long long limit,
+        const BSONObj& hint,
+        const MatchExpressionParser::WhereCallback& whereCallback =
+            MatchExpressionParser::WhereCallback());
 
-        //
-        // Accessors for the query
-        //
-        MatchExpression* root() const { return _root.get(); }
-        BSONObj getQueryObj() const { return _pq->getFilter(); }
-        const LiteParsedQuery& getParsed() const { return *_pq; }
-        const ParsedProjection* getProj() const { return _proj.get(); }
+    static StatusWith<std::unique_ptr<CanonicalQuery>> canonicalize(
+        const std::string& ns,
+        const BSONObj& query,
+        const BSONObj& sort,
+        const BSONObj& proj,
+        long long skip,
+        long long limit,
+        const BSONObj& hint,
+        const BSONObj& minObj,
+        const BSONObj& maxObj,
+        bool snapshot,
+        bool explain,
+        const MatchExpressionParser::WhereCallback& whereCallback =
+            MatchExpressionParser::WhereCallback());
 
-        /**
-         * Get the cache key for this canonical query.
-         */
-        const PlanCacheKey& getPlanCacheKey() const;
+    /**
+     * Returns true if "query" describes an exact-match query on _id, possibly with
+     * the $isolated/$atomic modifier.
+     */
+    static bool isSimpleIdQuery(const BSONObj& query);
 
-        // Debugging
-        string toString() const;
+    const NamespaceString& nss() const {
+        return _pq->nss();
+    }
+    const std::string& ns() const {
+        return _pq->nss().ns();
+    }
 
-        /**
-         * Validates match expression, checking for certain
-         * combinations of operators in match expression and
-         * query options in LiteParsedQuery.
-         * Since 'root' is derived from 'filter' in LiteParsedQuery,
-         * 'filter' is not validated.
-         *
-         * TODO: Move this to query_validator.cpp
-         */
-        static Status isValid(MatchExpression* root, const LiteParsedQuery& parsed);
+    //
+    // Accessors for the query
+    //
+    MatchExpression* root() const {
+        return _root.get();
+    }
+    BSONObj getQueryObj() const {
+        return _pq->getFilter();
+    }
+    const LiteParsedQuery& getParsed() const {
+        return *_pq;
+    }
+    const ParsedProjection* getProj() const {
+        return _proj.get();
+    }
 
-        /**
-         * Returns the normalized version of the subtree rooted at 'root'.
-         *
-         * Takes ownership of 'root'.
-         */
-        static MatchExpression* normalizeTree(MatchExpression* root);
+    // Debugging
+    std::string toString() const;
+    std::string toStringShort() const;
 
-        /**
-         * Traverses expression tree post-order.
-         * Sorts children at each non-leaf node by (MatchType, path(), cacheKey)
-         */
-        static void sortTree(MatchExpression* tree);
+    /**
+     * Validates match expression, checking for certain
+     * combinations of operators in match expression and
+     * query options in LiteParsedQuery.
+     * Since 'root' is derived from 'filter' in LiteParsedQuery,
+     * 'filter' is not validated.
+     *
+     * TODO: Move this to query_validator.cpp
+     */
+    static Status isValid(MatchExpression* root, const LiteParsedQuery& parsed);
 
-    private:
-        // You must go through canonicalize to create a CanonicalQuery.
-        CanonicalQuery() { }
+    /**
+     * Returns the normalized version of the subtree rooted at 'root'.
+     *
+     * Takes ownership of 'root'.
+     */
+    static MatchExpression* normalizeTree(MatchExpression* root);
 
-        /**
-         * Computes and stores the cache key / query shape
-         * for this query.
-         */
-        void generateCacheKey(void);
+    /**
+     * Traverses expression tree post-order.
+     * Sorts children at each non-leaf node by (MatchType, path(), children, number of children)
+     */
+    static void sortTree(MatchExpression* tree);
 
-        // Takes ownership of lpq
-        Status init(LiteParsedQuery* lpq);
+    /**
+     * Returns a count of 'type' nodes in expression tree.
+     */
+    static size_t countNodes(const MatchExpression* root, MatchExpression::MatchType type);
 
-        scoped_ptr<LiteParsedQuery> _pq;
+private:
+    // You must go through canonicalize to create a CanonicalQuery.
+    CanonicalQuery() {}
 
-        // _root points into _pq->getFilter()
-        scoped_ptr<MatchExpression> _root;
+    /**
+     * Takes ownership of 'root' and 'lpq'.
+     */
+    Status init(LiteParsedQuery* lpq,
+                const MatchExpressionParser::WhereCallback& whereCallback,
+                MatchExpression* root);
 
-        scoped_ptr<ParsedProjection> _proj;
+    std::unique_ptr<LiteParsedQuery> _pq;
 
-        /**
-         * Cache key is a string-ified combination of the query and sort obfuscated
-         * for minimal user comprehension.
-         */
-        PlanCacheKey _cacheKey;
-    };
+    // _root points into _pq->getFilter()
+    std::unique_ptr<MatchExpression> _root;
+
+    std::unique_ptr<ParsedProjection> _proj;
+};
 
 }  // namespace mongo

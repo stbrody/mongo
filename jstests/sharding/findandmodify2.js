@@ -2,6 +2,7 @@ var s = new ShardingTest({ name: "find_and_modify_sharded_2", shards: 2, verbose
 s.adminCommand( { enablesharding : "test" } );
 
 var db = s.getDB( "test" );
+s.ensurePrimaryShard('test', 'shard0001');
 var primary = s.getServer( "test" ).getDB( "test" );
 var secondary = s.getOther( primary ).getDB( "test" );
 
@@ -45,7 +46,6 @@ function via_fam() {
         { big: big }
     }});
   }
-  db.getLastError();
 }
 
 // upsert via findAndModify
@@ -55,7 +55,6 @@ function via_fam_upsert() {
         { big: big }
     }, upsert: true});
   }
-  db.getLastError();
 }
 
 // update data using basic update
@@ -69,7 +68,6 @@ function via_update() {
         { big: big }
     });
   }
-  db.getLastError();
 }
 
 // upsert data using basic update
@@ -79,7 +77,6 @@ function via_update_upsert() {
         { big: big }
     }, true);
   }
-  db.getLastError();
 }
 
 print("---------- Update via findAndModify...");

@@ -1,21 +1,24 @@
-// If we are running in use-x509 passthrough mode, turn it off or else the auth 
-// part of this test will not work correctly
-
-TestData.useX509 = false;
-
 // Check if this build supports the authenticationMechanisms startup parameter.
-var conn = MongoRunner.runMongod({ smallfiles: "", auth: "" });
+var conn = MongoRunner.runMongod({smallfiles: "",
+                                  auth: "",
+                                  sslMode: "requireSSL",
+                                  sslPEMKeyFile: "jstests/libs/server.pem",
+                                  sslCAFile: "jstests/libs/ca.pem"});
+conn.getDB('admin').createUser({user: "root", pwd: "pass", roles: ["root"]});
+conn.getDB('admin').auth("root", "pass");
 var cmdOut = conn.getDB('admin').runCommand({getParameter: 1, authenticationMechanisms: 1})
 if (cmdOut.ok) {
     TestData.authMechanism = "MONGODB-X509"; // SERVER-10353
 }
+conn.getDB('admin').dropAllUsers();
+conn.getDB('admin').logout();
 MongoRunner.stopMongod(conn);
 
 var SERVER_CERT = "jstests/libs/server.pem"
 var CA_CERT = "jstests/libs/ca.pem" 
 
-var CLIENT_USER = "CN=client,OU=kerneluser,O=10Gen,L=New York City,ST=New York,C=US"
-var INVALID_CLIENT_USER = "CN=invalidclient,OU=kerneluser,O=10Gen,L=New York City,ST=New York,C=US"
+var CLIENT_USER = "C=US,ST=New York,L=New York City,O=MongoDB,OU=KernelUser,CN=client"
+var INVALID_CLIENT_USER = "C=US,ST=New York,L=New York City,O=MongoDB,OU=KernelUser,CN=invalid"
 
 port = allocatePorts(1)[0];
 
@@ -46,19 +49,16 @@ function authAndTest(mongo) {
 }
 
 print("1. Testing x.509 auth to mongod");
-var mongo = MongoRunner.runMongod({port : port,
-                                sslMode : "requireSSL", 
-                                sslPEMKeyFile : SERVER_CERT, 
-                                sslCAFile : CA_CERT,
-                                auth:""});
-
-authAndTest(mongo);
-stopMongod(port);
-
-print("2. Testing x.509 auth to mongos");
 var x509_options = {sslMode : "requireSSL",
                     sslPEMKeyFile : SERVER_CERT,
                     sslCAFile : CA_CERT};
+
+var mongo = MongoRunner.runMongod(Object.merge(x509_options, {port: port, auth: ""}));
+
+authAndTest(mongo);
+MongoRunner.stopMongod(port);
+
+print("2. Testing x.509 auth to mongos");
 
 var st = new ShardingTest({ shards : 1,
                             mongos : 1,
@@ -66,6 +66,8 @@ var st = new ShardingTest({ shards : 1,
                                 extraOptions : {"keyFile" : "jstests/libs/key1"},
                                 configOptions : x509_options,
                                 mongosOptions : x509_options,
+                                shardOptions : x509_options,
+                                useHostname: false,
                             }});
 
 authAndTest(new Mongo("localhost:" + st.s0.port))

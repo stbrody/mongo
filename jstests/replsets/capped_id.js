@@ -39,6 +39,12 @@ var masterdb = master.getDB( dbname );
 var slave1db = slave1.getDB( dbname );
 var slave2db = slave2.getDB( dbname );
 
+function countIdIndexes(theDB, coll) {
+       return theDB[coll].getIndexes().filter(function(idx) {
+           return friendlyEqual(idx.key, {_id: 1});
+       }).length;
+}
+
 var numtests = 4;
 for( testnum=0; testnum < numtests; testnum++ ){
 
@@ -72,7 +78,7 @@ for( testnum=0; testnum < numtests; testnum++ ){
 
         // make sure _id index exists on primary
         assert.eq( 1 ,
-                   masterdb.system.indexes.find( { key:{"_id" : 1}, ns: dbname + "." + coll } ).count() ,
+                   countIdIndexes(masterdb, coll),
                    "master does not have _id index on normal collection");
 
         // then convert it to capped
@@ -98,13 +104,13 @@ for( testnum=0; testnum < numtests; testnum++ ){
         replTest.awaitReplication();
 
         assert.eq( 0 ,
-                masterdb.system.indexes.find( { key:{"_id" : 1}, ns: dbname + "." + coll } ).count() ,
+                countIdIndexes(masterdb, coll),
                 "master has an _id index on capped collection when autoIndexId is false");
         assert.eq( 0 ,
-                slave1db.system.indexes.find( { key:{"_id" : 1}, ns: dbname + "." + coll } ).count() ,
+                countIdIndexes(slave1db, coll),
                 "slave1 has an _id index on capped collection when autoIndexId is false");
         assert.eq( 0 ,
-                slave2db.system.indexes.find( { key:{"_id" : 1}, ns: dbname + "." + coll } ).count() ,
+                countIdIndexes(slave2db, coll),
                 "slave2 has an _id index on capped collection when autoIndexId is false");
 
         // now create the index and make sure it works
@@ -113,27 +119,27 @@ for( testnum=0; testnum < numtests; testnum++ ){
     }
 
     // what indexes do we have?
-    print("**********Master indexes:**********");
-    masterdb.system.indexes.find().forEach(printjson);
+    print("**********Master indexes on " + dbname + "." + coll + ":**********");
+    masterdb[coll].getIndexes().forEach(printjson);
     print("");
 
-    print("**********Slave1 indexes:**********");
-    slave1db.system.indexes.find().forEach(printjson);
+    print("**********Slave1 indexes on " + dbname + "." + coll + ":**********");
+    slave1db[coll].getIndexes().forEach(printjson);
     print("");
 
-    print("**********Slave2 indexes:**********");
-    slave2db.system.indexes.find().forEach(printjson);
+    print("**********Slave2 indexes on " + dbname + "." + coll + ":**********");
+    slave2db[coll].getIndexes().forEach(printjson);
     print("");
 
     // ensure all nodes have _id index
     assert.eq( 1 ,
-               masterdb.system.indexes.find( { key:{"_id" : 1}, ns: dbname + "." + coll } ).count() ,
+               countIdIndexes(masterdb, coll),
                "master has an _id index on capped collection");
     assert.eq( 1 ,
-               slave1db.system.indexes.find( { key:{"_id" : 1}, ns: dbname + "." + coll } ).count() ,
+               countIdIndexes(slave1db, coll),
                "slave1 does not have _id index on capped collection");
     assert.eq( 1 ,
-               slave2db.system.indexes.find( { key:{"_id" : 1}, ns: dbname + "." + coll } ).count() ,
+               countIdIndexes(slave2db, coll),
                "slave2 does not have _id index on capped collection");
 
     print("capped_id.js Test # " + testnum + " SUCCESS");

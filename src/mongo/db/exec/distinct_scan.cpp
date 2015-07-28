@@ -28,191 +28,138 @@
 
 #include "mongo/db/exec/distinct_scan.h"
 
+#include "mongo/db/concurrency/write_conflict_exception.h"
 #include "mongo/db/exec/filter.h"
+#include "mongo/db/exec/scoped_timer.h"
 #include "mongo/db/exec/working_set_computed_data.h"
 #include "mongo/db/index/index_access_method.h"
-#include "mongo/db/index/index_cursor.h"
 #include "mongo/db/index/index_descriptor.h"
+#include "mongo/stdx/memory.h"
 
 namespace mongo {
 
-    DistinctScan::DistinctScan(const DistinctParams& params, WorkingSet* workingSet)
-        : _workingSet(workingSet),
-          _descriptor(params.descriptor),
-          _iam(params.descriptor->getIndexCatalog()->getIndex(params.descriptor)),
-          _btreeCursor(NULL),
-          _hitEnd(false),
-          _params(params) { }
+using std::unique_ptr;
+using std::vector;
+using stdx::make_unique;
 
-    void DistinctScan::initIndexCursor() {
-        // Create an IndexCursor over the btree we're distinct-ing over.
-        CursorOptions cursorOptions;
+// static
+const char* DistinctScan::kStageType = "DISTINCT_SCAN";
 
-        if (1 == _params.direction) {
-            cursorOptions.direction = CursorOptions::INCREASING;
-        }
-        else {
-            cursorOptions.direction = CursorOptions::DECREASING;
-        }
+DistinctScan::DistinctScan(OperationContext* txn,
+                           const DistinctParams& params,
+                           WorkingSet* workingSet)
+    : PlanStage(kStageType),
+      _txn(txn),
+      _workingSet(workingSet),
+      _descriptor(params.descriptor),
+      _iam(params.descriptor->getIndexCatalog()->getIndex(params.descriptor)),
+      _params(params),
+      _checker(&_params.bounds, _descriptor->keyPattern(), _params.direction) {
+    _specificStats.keyPattern = _params.descriptor->keyPattern();
+    _specificStats.indexName = _params.descriptor->indexName();
+    _specificStats.indexVersion = _params.descriptor->version();
 
-        IndexCursor *cursor;
-        Status s = _iam->newCursor(&cursor);
-        verify(s.isOK());
-        verify(cursor);
-        // Is this assumption always valid?  See SERVER-12397
-        _btreeCursor.reset(static_cast<BtreeIndexCursor*>(cursor));
-        _btreeCursor->setOptions(cursorOptions);
+    // Set up our initial seek. If there is no valid data, just mark as EOF.
+    _commonStats.isEOF = !_checker.getStartSeekPoint(&_seekPoint);
+}
 
-        // Create a new bounds checker.  The bounds checker gets our start key and assists in
-        // executing the scan and staying within the required bounds.
-        _checker.reset(new IndexBoundsChecker(&_params.bounds,
-                                              _descriptor->keyPattern(),
-                                              _params.direction));
+PlanStage::StageState DistinctScan::work(WorkingSetID* out) {
+    ++_commonStats.works;
+    if (_commonStats.isEOF)
+        return PlanStage::IS_EOF;
 
-        int nFields = _descriptor->keyPattern().nFields();
-        // The start key is dumped into these two.
-        vector<const BSONElement*> key;
-        vector<bool> inc;
-        key.resize(nFields);
-        inc.resize(nFields);
-        if (_checker->getStartKey(&key, &inc)) {
-            _btreeCursor->seek(key, inc);
-            _keyElts.resize(nFields);
-            _keyEltsInc.resize(nFields);
-        }
-        else {
-            _hitEnd = true;
-        }
+    // Adds the amount of time taken by work() to executionTimeMillis.
+    ScopedTimer timer(&_commonStats.executionTimeMillis);
+
+    boost::optional<IndexKeyEntry> kv;
+    try {
+        if (!_cursor)
+            _cursor = _iam->newCursor(_txn, _params.direction == 1);
+        kv = _cursor->seek(_seekPoint);
+    } catch (const WriteConflictException& wce) {
+        *out = WorkingSet::INVALID_ID;
+        return PlanStage::NEED_YIELD;
     }
 
-    PlanStage::StageState DistinctScan::work(WorkingSetID* out) {
-        ++_commonStats.works;
-
-        if (NULL == _btreeCursor.get()) {
-            // First call to work().  Perform cursor init.
-            initIndexCursor();
-            checkEnd();
-        }
-
-        if (isEOF()) { return PlanStage::IS_EOF; }
-
-        // Grab the next (key, value) from the index.
-        BSONObj ownedKeyObj = _btreeCursor->getKey().getOwned();
-        DiskLoc loc = _btreeCursor->getValue();
-
-        // The underlying IndexCursor points at the *next* thing we want to return.  We do this so
-        // that if we're scanning an index looking for docs to delete we don't continually clobber
-        // the thing we're pointing at.
-
-        // We skip to the next value of the _params.fieldNo-th field in the index key pattern.
-        // This is the field we're distinct-ing over.
-        _btreeCursor->skip(_btreeCursor->getKey(),
-                           _params.fieldNo + 1,
-                           true,
-                           _keyElts,
-                           _keyEltsInc);
-
-        // And make sure we're within the bounds.
-        checkEnd();
-
-        // Package up the result for the caller.
-        WorkingSetID id = _workingSet->allocate();
-        WorkingSetMember* member = _workingSet->get(id);
-        member->loc = loc;
-        member->keyData.push_back(IndexKeyDatum(_descriptor->keyPattern(), ownedKeyObj));
-        member->state = WorkingSetMember::LOC_AND_IDX;
-
-        *out = id;
-        ++_commonStats.advanced;
-        return PlanStage::ADVANCED;
+    if (!kv) {
+        _commonStats.isEOF = true;
+        return PlanStage::IS_EOF;
     }
 
-    bool DistinctScan::isEOF() {
-        if (NULL == _btreeCursor.get()) {
-            // Have to call work() at least once.
-            return false;
-        }
+    ++_specificStats.keysExamined;
 
-        return _hitEnd || _btreeCursor->isEOF();
-    }
+    switch (_checker.checkKey(kv->key, &_seekPoint)) {
+        case IndexBoundsChecker::MUST_ADVANCE:
+            // Try again next time. The checker has adjusted the _seekPoint.
+            ++_commonStats.needTime;
+            return PlanStage::NEED_TIME;
 
-    void DistinctScan::prepareToYield() {
-        ++_commonStats.yields;
-
-        if (isEOF() || (NULL == _btreeCursor.get())) { return; }
-        // We save these so that we know if the cursor moves during the yield.  If it moves, we have
-        // to make sure its ending position is valid w.r.t. our bounds.
-        _savedKey = _btreeCursor->getKey().getOwned();
-        _savedLoc = _btreeCursor->getValue();
-        _btreeCursor->savePosition();
-    }
-
-    void DistinctScan::recoverFromYield() {
-        ++_commonStats.unyields;
-
-        if (isEOF() || (NULL == _btreeCursor.get())) { return; }
-
-        // We can have a valid position before we check isEOF(), restore the position, and then be
-        // EOF upon restore.
-        if (!_btreeCursor->restorePosition().isOK() || _btreeCursor->isEOF()) {
-            _hitEnd = true;
-            return;
-        }
-
-        if (!_savedKey.binaryEqual(_btreeCursor->getKey()) || _savedLoc != _btreeCursor->getValue()) {
-            // Our restored position might be past endKey, see if we've hit the end.
-            checkEnd();
-        }
-    }
-
-    void DistinctScan::invalidate(const DiskLoc& dl, InvalidationType type) {
-        ++_commonStats.invalidates;
-    }
-
-    void DistinctScan::checkEnd() {
-        if (isEOF()) {
+        case IndexBoundsChecker::DONE:
+            // There won't be a next time.
             _commonStats.isEOF = true;
-            return;
-        }
+            _cursor.reset();
+            return IS_EOF;
 
-        // Use _checker to see how things are.
-        for (;;) {
-            IndexBoundsChecker::KeyState keyState;
-            keyState = _checker->checkKey(_btreeCursor->getKey(),
-                                          &_keyEltsToUse,
-                                          &_movePastKeyElts,
-                                          &_keyElts,
-                                          &_keyEltsInc);
+        case IndexBoundsChecker::VALID:
+            // Return this key. Adjust the _seekPoint so that it is exclusive on the field we
+            // are using.
 
-            if (IndexBoundsChecker::DONE == keyState) {
-                _hitEnd = true;
-                break;
-            }
+            if (!kv->key.isOwned())
+                kv->key = kv->key.getOwned();
+            _seekPoint.keyPrefix = kv->key;
+            _seekPoint.prefixLen = _params.fieldNo + 1;
+            _seekPoint.prefixExclusive = true;
 
-            // This seems weird but it's the old definition of nscanned.
-            ++_specificStats.keysExamined;
+            // Package up the result for the caller.
+            WorkingSetID id = _workingSet->allocate();
+            WorkingSetMember* member = _workingSet->get(id);
+            member->loc = kv->loc;
+            member->keyData.push_back(IndexKeyDatum(_descriptor->keyPattern(), kv->key, _iam));
+            _workingSet->transitionToLocAndIdx(id);
 
-            if (IndexBoundsChecker::VALID == keyState) {
-                break;
-            }
-
-            verify(IndexBoundsChecker::MUST_ADVANCE == keyState);
-            _btreeCursor->skip(_btreeCursor->getKey(), _keyEltsToUse, _movePastKeyElts,
-                               _keyElts, _keyEltsInc);
-
-            // Must check underlying cursor EOF after every cursor movement.
-            if (_btreeCursor->isEOF()) {
-                _hitEnd = true;
-                break;
-            }
-        }
+            *out = id;
+            ++_commonStats.advanced;
+            return PlanStage::ADVANCED;
     }
+    invariant(false);
+}
 
-    PlanStageStats* DistinctScan::getStats() {
-        _commonStats.isEOF = isEOF();
-        auto_ptr<PlanStageStats> ret(new PlanStageStats(_commonStats, STAGE_DISTINCT));
-        ret->specific.reset(new DistinctScanStats(_specificStats));
-        return ret.release();
-    }
+bool DistinctScan::isEOF() {
+    return _commonStats.isEOF;
+}
+
+void DistinctScan::doSaveState() {
+    // We always seek, so we don't care where the cursor is.
+    if (_cursor)
+        _cursor->saveUnpositioned();
+}
+
+void DistinctScan::doRestoreState() {
+    if (_cursor)
+        _cursor->restore();
+}
+
+void DistinctScan::doDetachFromOperationContext() {
+    _txn = NULL;
+    if (_cursor)
+        _cursor->detachFromOperationContext();
+}
+
+void DistinctScan::doReattachToOperationContext(OperationContext* opCtx) {
+    invariant(_txn == NULL);
+    _txn = opCtx;
+    if (_cursor)
+        _cursor->reattachToOperationContext(opCtx);
+}
+
+unique_ptr<PlanStageStats> DistinctScan::getStats() {
+    unique_ptr<PlanStageStats> ret = make_unique<PlanStageStats>(_commonStats, STAGE_DISTINCT_SCAN);
+    ret->specific = make_unique<DistinctScanStats>(_specificStats);
+    return ret;
+}
+
+const SpecificStats* DistinctScan::getSpecificStats() const {
+    return &_specificStats;
+}
 
 }  // namespace mongo

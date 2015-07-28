@@ -28,26 +28,25 @@
 
 #pragma once
 
-#include "mongo/db/jsobj.h"
+#include <string>
 
 namespace mongo {
 
-    class ShardConnection;
-    class DBClientBase;
+class DBClientBase;
+class ShardConnection;
 
-    class VersionManager {
-    public:
-        VersionManager(){};
 
-        bool isVersionableCB( DBClientBase* );
-        bool initShardVersionCB( DBClientBase*, BSONObj& );
-        bool forceRemoteCheckShardVersionCB( const string& );
-        bool checkShardVersionCB( DBClientBase*, const string&, bool, int );
-        bool checkShardVersionCB( ShardConnection*, bool, int );
-        void resetShardVersionCB( DBClientBase* );
+class VersionManager {
+public:
+    VersionManager() {}
 
-    };
+    bool isVersionableCB(DBClientBase*);
+    bool forceRemoteCheckShardVersionCB(const std::string&);
+    bool checkShardVersionCB(DBClientBase*, const std::string&, bool, int);
+    bool checkShardVersionCB(ShardConnection*, bool, int);
+    void resetShardVersionCB(DBClientBase*);
+};
 
-    extern VersionManager versionManager;
+extern VersionManager versionManager;
 
-} // namespace mongo
+}  // namespace mongo

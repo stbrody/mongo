@@ -7,9 +7,8 @@
 for ( var test = 0; test < 2; test++ ) {
 
 var killWith = (test == 0 ? 15 : 9);
-var options = { separateConfig : true };
 
-var st = new ShardingTest({shards : 2, mongos : 1, other : options});
+var st = new ShardingTest({shards : 2, mongos : 1});
 
 // Stop balancer to eliminate weird conn stuff
 st.stopBalancer();
@@ -29,10 +28,9 @@ if ( is32Bits && _isWindows() ) {
 else {
     
     // Non-Win32 platform
-    
-    coll.insert({ hello : "world" })
-    assert.eq( null, coll.getDB().getLastError() );
-    
+
+    assert.writeOK(coll.insert({ hello: "world" }));
+
     jsTest.log("Creating new connections...");
     
     // Create a bunch of connections to the primary node through mongos.

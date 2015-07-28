@@ -2,9 +2,7 @@
 // Tests that a migration does not overwrite duplicate _ids on data transfer
 //
 
-var options = { separateConfig : true };
-
-var st = new ShardingTest({ shards : 2, mongos : 1, other : options });
+var st = new ShardingTest({ shards : 2, mongos : 1 });
 st.stopBalancer();
 
 var mongos = st.s0;
@@ -24,11 +22,8 @@ var id = 12345;
 
 jsTest.log( "Inserting a document with id : 12345 into both shards with diff shard key..." );
 
-coll.insert({ _id : id, skey : -1 });
-assert.eq( null, coll.getDB().getLastError() );
-
-coll.insert({ _id : id, skey : 1 });
-assert.eq( null, coll.getDB().getLastError() );
+assert.writeOK(coll.insert({ _id : id, skey : -1 }));
+assert.writeOK(coll.insert({ _id : id, skey : 1 }));
 
 printjson( shards[0].conn.getCollection( coll + "" ).find({ _id : id }).toArray() );
 printjson( shards[1].conn.getCollection( coll + "" ).find({ _id : id }).toArray() );

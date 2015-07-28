@@ -6,6 +6,7 @@ function setupMoveChunkTest(st) {
     var testcoll = testdb.foo;
 
     st.adminCommand( { enablesharding : "test" } );
+    st.ensurePrimaryShard('test', 'shard0001');
     st.adminCommand( { shardcollection : "test.foo" , key : { _id : 1 } } );
 
     var str = "";
@@ -13,16 +14,16 @@ function setupMoveChunkTest(st) {
         str += "asdasdsdasdasdasdas";
     }
 
-    var data = num = 0;
+    var data = 0;
+    var num = 0;
 
     //Insert till you get to 10MB of data
+    var bulk = testcoll.initializeUnorderedBulkOp();
     while ( data < ( 1024 * 1024 * 10 ) ) {
-        testcoll.insert( { _id : num++ , s : str } )
-        data += str.length
+        bulk.insert({ _id: num++, s: str });
+        data += str.length;
     }
-
-    //Flush and wait
-    testdb.getLastError()
+    assert.writeOK(bulk.execute());
 
     var stats = st.chunkCounts( "foo" )
     var to = ""

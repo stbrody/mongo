@@ -2,6 +2,7 @@
 s = new ShardingTest( "migrateBig" , 2 , 0 , 1 , { chunksize : 1 } );
 s.config.settings.update( { _id: "balancer" }, { $set : { stopped : true, _waitForDelete : true } } , true );
 s.adminCommand( { enablesharding : "test" } );
+s.ensurePrimaryShard('test', 'shard0001');
 s.adminCommand( { shardcollection : "test.foo" , key : { x : 1 } } );
 
 db = s.getDB( "test" )
@@ -11,9 +12,11 @@ big = ""
 while ( big.length < 10000 )
     big += "eliot"
 
-for ( x=0; x<100; x++ )
-    coll.insert( { x : x , big : big } )
-db.getLastError();
+var bulk = coll.initializeUnorderedBulkOp();
+for ( x=0; x<100; x++ ) {
+    bulk.insert( { x : x , big : big } );
+}
+assert.writeOK(bulk.execute());
 
 db.printShardingStatus()
 
@@ -30,8 +33,7 @@ print( "direct : " + direct )
 directDB = direct.getDB( "test" )
 
 for ( done=0; done<2*1024*1024; done+=big.length ){
-    directDB.foo.insert( { x : 50 + Math.random() , big : big } )
-    directDB.getLastError();
+    assert.writeOK(directDB.foo.insert( { x : 50 + Math.random() , big : big } ));
 }
 
 db.printShardingStatus()

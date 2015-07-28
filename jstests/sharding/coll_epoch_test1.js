@@ -1,6 +1,6 @@
 // Tests various cases of dropping and recreating collections in the same namespace with multiple mongoses
 
-var st = new ShardingTest({ shards : 3, mongos : 3, verbose : 1, separateConfig : 1  })
+var st = new ShardingTest({ shards : 3, mongos : 3, verbose : 1 })
 // Stop balancer, it'll interfere
 st.stopBalancer()
 
@@ -28,11 +28,14 @@ config.shards.find().forEach( function( doc ){
 jsTest.log( "Enabling sharding for the first time..." )
 
 admin.runCommand({ enableSharding : coll.getDB() + "" })
+st.ensurePrimaryShard(coll.getDB().getName(), 'shard0001');
 admin.runCommand({ shardCollection : coll  + "", key : { _id : 1 } })
 
-for( var i = 0; i < 100; i++ )
-    insertMongos.getCollection( coll + "" ).insert({ _id : i, test : "a" })
-assert.eq( null, insertMongos.getDB( coll.getDB() + "" ).getLastError() )    
+var bulk = insertMongos.getCollection( coll + "" ).initializeUnorderedBulkOp();
+for( var i = 0; i < 100; i++ ) {
+    bulk.insert({ _id : i, test : "a" });
+}
+assert.writeOK( bulk.execute() );
 assert.eq( 100, staleMongos.getCollection( coll + "" ).find({ test : "a" }).itcount() )
 
 coll.drop()
@@ -45,12 +48,15 @@ coll.drop()
 jsTest.log( "Re-enabling sharding with a different key..." )
 
 admin.runCommand({ enableSharding : coll.getDB() + "" })
+st.ensurePrimaryShard(coll.getDB().getName(), 'shard0001');
 coll.ensureIndex({ notId : 1 })
 admin.runCommand({ shardCollection : coll  + "", key : { notId : 1 } })
 
-for( var i = 0; i < 100; i++ )
-    insertMongos.getCollection( coll + "" ).insert({ notId : i, test : "b" })
-assert.eq( null, insertMongos.getDB( coll.getDB() + "" ).getLastError() )
+bulk = insertMongos.getCollection( coll + "" ).initializeUnorderedBulkOp();
+for( var i = 0; i < 100; i++ ) {
+    bulk.insert({ notId : i, test : "b" });
+}
+assert.writeOK( bulk.execute() );
 assert.eq( 100, staleMongos.getCollection( coll + "" ).find({ test : "b" }).itcount() )
 assert.eq( 0, staleMongos.getCollection( coll + "" ).find({ test : { $in : [ "a" ] } }).itcount() )
 
@@ -73,12 +79,11 @@ admin.runCommand({ movePrimary : coll.getDB() + "",
                    to : getOtherShard( config.databases.findOne({ _id : coll.getDB() + "" }).primary ) })
 
 jsTest.log( "moved primary..." )
-                   
-for( var i = 0; i < 100; i++ )
-    insertMongos.getCollection( coll + "" ).insert({ test : "c" })
-assert.eq( null, insertMongos.getDB( coll.getDB() + "" ).getLastError() )
 
-jsTest.log( "waited for gle..." )
+bulk = insertMongos.getCollection( coll + "" ).initializeUnorderedBulkOp();
+for( var i = 0; i < 100; i++ )
+    bulk.insert({ test : "c" });
+assert.writeOK( bulk.execute() );
 
 assert.eq( 100, staleMongos.getCollection( coll + "" ).find({ test : "c" }).itcount() )
 assert.eq( 0, staleMongos.getCollection( coll + "" ).find({ test : { $in : [ "a", "b" ] } }).itcount() )
@@ -97,9 +102,11 @@ admin.runCommand({ movePrimary : coll.getDB() + "",
                    to : getOtherShard( config.databases.findOne({ _id : coll.getDB() + "" }).primary ) })
 admin.runCommand({ shardCollection : coll  + "", key : { _id : 1 } })
 
+bulk = insertMongos.getCollection( coll + "" ).initializeUnorderedBulkOp();
 for( var i = 0; i < 100; i++ )
-    insertMongos.getCollection( coll + "" ).insert({ test : "d" })
-assert.eq( null, insertMongos.getDB( coll.getDB() + "" ).getLastError() )
+    bulk.insert({ test : "d" });
+assert.writeOK( bulk.execute() );
+
 assert.eq( 100, staleMongos.getCollection( coll + "" ).find({ test : "d" }).itcount() )
 assert.eq( 0, staleMongos.getCollection( coll + "" ).find({ test : { $in : [ "a", "b", "c" ] } }).itcount() )
 

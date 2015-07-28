@@ -1,6 +1,6 @@
 // tests that listDatabases doesn't show config db on a shard, even if it is there
 
-var test = new ShardingTest({shards: 1, mongos: 1, config: 1, other: {chunksize:1, separateConfig:true}})
+var test = new ShardingTest({shards: 1, mongos: 1, other: {chunksize:1}})
 
 var mongos = test.s0
 var mongod = test.shard0;
@@ -14,11 +14,9 @@ var getDBSection = function (dbsArray, dbToFind) {
     return null;
 }
 
-mongos.getDB("blah").foo.insert({_id:1})
-mongos.getDB("foo").foo.insert({_id:1})
-mongos.getDB("raw").foo.insert({_id:1})
-//wait for writes to finish
-mongos.getDB("raw").getLastError()
+assert.writeOK(mongos.getDB("blah").foo.insert({ _id: 1 }));
+assert.writeOK(mongos.getDB("foo").foo.insert({ _id: 1 }));
+assert.writeOK(mongos.getDB("raw").foo.insert({ _id: 1 }));
 
 //verify that the config db is not on a shard
 var res = mongos.adminCommand("listDatabases");

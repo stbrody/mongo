@@ -6,11 +6,12 @@ function step(msg) {
     print('\n' + name + ".js step " + this.x + ' ' + msg);
 }
 
-s = new ShardingTest( "dumprestore9a", 2, 0, 3, {chunksize:1} );
+s = new ShardingTest( "dumprestore9a", 2, 0, 3, { chunksize : 1, enableBalancer : 1 } );
 
 step("Shard collection");
 
 s.adminCommand( { enablesharding : "aaa" } ); // Make this db alphabetically before 'config' so it gets restored first
+s.ensurePrimaryShard('aaa', 'shard0001');
 s.adminCommand( { shardcollection : "aaa.foo" , key : { x : 1 } } );
 
 db = s.getDB( "aaa" );

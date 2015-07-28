@@ -1,5 +1,6 @@
 // Basic test of sharding with a hashed shard key
 //  - Test basic migrations with moveChunk, using different chunk specification methods
+// @tags : [ hashed ]
 
 var s = new ShardingTest( { name : jsTestName() , shards : 3 , mongos : 1, verbose : 1 } );
 var dbname = "test";
@@ -8,6 +9,7 @@ var ns = dbname + "." + coll;
 var db = s.getDB( dbname );
 var t = db.getCollection( coll );
 db.adminCommand( { enablesharding : dbname } );
+s.ensurePrimaryShard(dbname, 'shard0001');
 
 // for simplicity start by turning off balancer
 s.stopBalancer();

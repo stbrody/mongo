@@ -28,63 +28,153 @@
 *    it in the license file.
 */
 
+#include "mongo/platform/basic.h"
+
 #include "mongo/db/background.h"
+
+#include <iostream>
+#include <string>
+
+#include "mongo/base/disallow_copying.h"
+#include "mongo/stdx/condition_variable.h"
+#include "mongo/stdx/thread.h"
+#include "mongo/util/assert_util.h"
+#include "mongo/util/map_util.h"
+#include "mongo/util/mongoutils/str.h"
+#include "mongo/util/string_map.h"
 
 namespace mongo {
 
-    SimpleMutex BackgroundOperation::m("bg");
-    std::map<std::string, unsigned> BackgroundOperation::dbsInProg;
-    std::set<std::string> BackgroundOperation::nsInProg;
+using std::shared_ptr;
 
-    bool BackgroundOperation::inProgForDb(const StringData& db) {
-        SimpleMutex::scoped_lock lk(m);
-        return dbsInProg[db.toString()] > 0;
+namespace {
+
+class BgInfo {
+    MONGO_DISALLOW_COPYING(BgInfo);
+
+public:
+    BgInfo() : _opsInProgCount(0) {}
+
+    void recordBegin();
+    int recordEnd();
+    void awaitNoBgOps(stdx::unique_lock<stdx::mutex>& lk);
+
+    int getOpsInProgCount() const {
+        return _opsInProgCount;
     }
 
-    bool BackgroundOperation::inProgForNs(const StringData& ns) {
-        SimpleMutex::scoped_lock lk(m);
-        return nsInProg.count(ns.toString()) > 0;
+private:
+    int _opsInProgCount;
+    stdx::condition_variable _noOpsInProg;
+};
+
+typedef StringMap<std::shared_ptr<BgInfo>> BgInfoMap;
+typedef BgInfoMap::const_iterator BgInfoMapIterator;
+
+stdx::mutex m;
+BgInfoMap dbsInProg;
+BgInfoMap nsInProg;
+
+void BgInfo::recordBegin() {
+    ++_opsInProgCount;
+}
+
+int BgInfo::recordEnd() {
+    dassert(_opsInProgCount > 0);
+    --_opsInProgCount;
+    if (0 == _opsInProgCount) {
+        _noOpsInProg.notify_all();
     }
+    return _opsInProgCount;
+}
 
-    void BackgroundOperation::assertNoBgOpInProgForDb(const StringData& db) {
-        uassert(12586,
-                "cannot perform operation: a background operation is currently running for this database",
-                !inProgForDb(db));
+void BgInfo::awaitNoBgOps(stdx::unique_lock<stdx::mutex>& lk) {
+    while (_opsInProgCount > 0)
+        _noOpsInProg.wait(lk);
+}
+
+void recordBeginAndInsert(BgInfoMap* bgiMap, StringData key) {
+    std::shared_ptr<BgInfo>& bgInfo = bgiMap->get(key);
+    if (!bgInfo)
+        bgInfo.reset(new BgInfo);
+    bgInfo->recordBegin();
+}
+
+void recordEndAndRemove(BgInfoMap* bgiMap, StringData key) {
+    BgInfoMapIterator iter = bgiMap->find(key);
+    fassert(17431, iter != bgiMap->end());
+    if (0 == iter->second->recordEnd()) {
+        bgiMap->erase(iter);
     }
+}
 
-    void BackgroundOperation::assertNoBgOpInProgForNs(const StringData& ns) {
-        uassert(12587,
-                "cannot perform operation: a background operation is currently running for this collection",
-                !inProgForNs(ns));
+void awaitNoBgOps(stdx::unique_lock<stdx::mutex>& lk, BgInfoMap* bgiMap, StringData key) {
+    std::shared_ptr<BgInfo> bgInfo = mapFindWithDefault(*bgiMap, key, std::shared_ptr<BgInfo>());
+    if (!bgInfo)
+        return;
+    bgInfo->awaitNoBgOps(lk);
+}
+
+}  // namespace
+bool BackgroundOperation::inProgForDb(StringData db) {
+    stdx::lock_guard<stdx::mutex> lk(m);
+    return dbsInProg.find(db) != dbsInProg.end();
+}
+
+bool BackgroundOperation::inProgForNs(StringData ns) {
+    stdx::lock_guard<stdx::mutex> lk(m);
+    return nsInProg.find(ns) != nsInProg.end();
+}
+
+void BackgroundOperation::assertNoBgOpInProgForDb(StringData db) {
+    uassert(ErrorCodes::BackgroundOperationInProgressForDatabase,
+            mongoutils::str::stream()
+                << "cannot perform operation: a background operation is currently running for "
+                   "database " << db,
+            !inProgForDb(db));
+}
+
+void BackgroundOperation::assertNoBgOpInProgForNs(StringData ns) {
+    uassert(ErrorCodes::BackgroundOperationInProgressForNamespace,
+            mongoutils::str::stream()
+                << "cannot perform operation: a background operation is currently running for "
+                   "collection " << ns,
+            !inProgForNs(ns));
+}
+
+void BackgroundOperation::awaitNoBgOpInProgForDb(StringData db) {
+    stdx::unique_lock<stdx::mutex> lk(m);
+    awaitNoBgOps(lk, &dbsInProg, db);
+}
+
+void BackgroundOperation::awaitNoBgOpInProgForNs(StringData ns) {
+    stdx::unique_lock<stdx::mutex> lk(m);
+    awaitNoBgOps(lk, &nsInProg, ns);
+}
+
+BackgroundOperation::BackgroundOperation(StringData ns) : _ns(ns) {
+    stdx::lock_guard<stdx::mutex> lk(m);
+    recordBeginAndInsert(&dbsInProg, _ns.db());
+    recordBeginAndInsert(&nsInProg, _ns.ns());
+}
+
+BackgroundOperation::~BackgroundOperation() {
+    stdx::lock_guard<stdx::mutex> lk(m);
+    recordEndAndRemove(&dbsInProg, _ns.db());
+    recordEndAndRemove(&nsInProg, _ns.ns());
+}
+
+void BackgroundOperation::dump(std::ostream& ss) {
+    stdx::lock_guard<stdx::mutex> lk(m);
+    if (nsInProg.size()) {
+        ss << "\n<b>Background Jobs in Progress</b>\n";
+        for (BgInfoMapIterator i = nsInProg.begin(); i != nsInProg.end(); ++i)
+            ss << "  " << i->first << '\n';
     }
-
-    BackgroundOperation::BackgroundOperation(const StringData& ns) : _ns(ns) {
-        SimpleMutex::scoped_lock lk(m);
-        dbsInProg[_ns.db().toString()]++;
-        nsInProg.insert(_ns.ns());
+    for (BgInfoMapIterator i = dbsInProg.begin(); i != dbsInProg.end(); ++i) {
+        if (i->second->getOpsInProgCount())
+            ss << "database " << i->first << ": " << i->second->getOpsInProgCount() << '\n';
     }
+}
 
-    BackgroundOperation::~BackgroundOperation() {
-        SimpleMutex::scoped_lock lk(m);
-        dbsInProg[_ns.db().toString()]--;
-        nsInProg.erase(_ns.ns());
-    }
-
-    void BackgroundOperation::dump(std::stringstream& ss) {
-        SimpleMutex::scoped_lock lk(m);
-        if( nsInProg.size() ) {
-            ss << "\n<b>Background Jobs in Progress</b>\n";
-            for( std::set<std::string>::iterator i = nsInProg.begin(); i != nsInProg.end(); i++ )
-                ss << "  " << *i << '\n';
-        }
-        for( std::map<std::string,unsigned>::iterator i = dbsInProg.begin(); i != dbsInProg.end(); i++ ) {
-            if( i->second )
-                ss << "database " << i->first << ": " << i->second << '\n';
-        }
-    }
-
-
-
-
-} // namespace mongo
-
+}  // namespace mongo

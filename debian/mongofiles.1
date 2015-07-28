@@ -1,8 +1,8 @@
 .\" Man page generated from reStructuredText.
 .
-.TH "MONGOFILES" "1" "October 03, 2013" "2.4" "mongodb-manual"
+.TH "MONGOFILES" "1" "January 30, 2015" "3.0" "mongodb-manual"
 .SH NAME
-mongofiles \- MongoDB
+mongofiles \- MongoDB GridFS Utility
 .
 .nr rst2man-indent-level 0
 .
@@ -76,6 +76,11 @@ For \fIreplica sets\fP,
 .UNINDENT
 .UNINDENT
 .SH OPTIONS
+.sp
+Changed in version 3.0.0: \fBmongofiles\fP removed the \fB\-\-dbpath\fP as well as related
+\fB\-\-directoryperdb\fP and \fB\-\-journal\fP options. You must use
+\fBmongofiles\fP while connected to a \fBmongod\fP instance.
+
 .INDENT 0.0
 .TP
 .B mongofiles
@@ -83,89 +88,211 @@ For \fIreplica sets\fP,
 .INDENT 0.0
 .TP
 .B \-\-help
-Returns a basic help and usage text.
+Returns information on the options and use of \fBmongofiles\fP\&.
 .UNINDENT
 .INDENT 0.0
 .TP
 .B \-\-verbose, \-v
-Increases the amount of internal reporting returned on the command
-line. Increase the verbosity with the \fB\-v\fP form by including
-the option multiple times, (e.g. \fB\-vvvvv\fP\&.)
+Increases the amount of internal reporting returned on standard output
+or in log files. Increase the verbosity with the \fB\-v\fP form by
+including the option multiple times, (e.g. \fB\-vvvvv\fP\&.)
+.UNINDENT
+.INDENT 0.0
+.TP
+.B \-\-quiet
+Runs the \fBmongofiles\fP in a quiet mode that attempts to limit the amount
+of output.
+.sp
+This option suppresses:
+.INDENT 7.0
+.IP \(bu 2
+output from \fIdatabase commands\fP
+.IP \(bu 2
+replication activity
+.IP \(bu 2
+connection accepted events
+.IP \(bu 2
+connection closed events
+.UNINDENT
 .UNINDENT
 .INDENT 0.0
 .TP
 .B \-\-version
-Returns the version of the \fBmongofiles\fP utility.
+Returns the \fBmongofiles\fP release number.
 .UNINDENT
 .INDENT 0.0
 .TP
 .B \-\-host <hostname><:port>
-Specifies a resolvable hostname for the \fBmongod\fP that
-holds your GridFS system. By default \fBmongofiles\fP attempts
-to connect to a MongoDB process ruining on the localhost port
-number \fB27017\fP\&.
+Specifies a resolvable hostname for the \fBmongod\fP that holds
+your GridFS system. By default \fBmongofiles\fP attempts to connect
+to a MongoDB process running on the localhost port number \fB27017\fP\&.
 .sp
-Optionally, specify a port number to connect a MongoDB instance
-running on a port other than 27017.
+Optionally, specify a port number to connect a MongoDB instance running
+on a port other than 27017.
 .UNINDENT
 .INDENT 0.0
 .TP
 .B \-\-port <port>
-Specifies the port number, if the MongoDB instance is not running on
-the standard port. (i.e. \fB27017\fP) You may also specify a port
-number using the \fImongofiles \-\-host\fP command.
+\fIDefault\fP: 27017
+.sp
+Specifies the TCP port on which the MongoDB instance listens for
+client connections.
 .UNINDENT
 .INDENT 0.0
 .TP
 .B \-\-ipv6
-Enables IPv6 support that allows \fBmongofiles\fP to connect
-to the MongoDB instance using an IPv6 network. All MongoDB programs
-and processes, including \fBmongofiles\fP, disable IPv6
-support by default.
+Enables IPv6 support and allows the \fBmongofiles\fP to connect to the
+MongoDB instance using an IPv6 network. All MongoDB programs and
+processes disable IPv6 support by default.
 .UNINDENT
 .INDENT 0.0
 .TP
 .B \-\-ssl
-New in version 2.4: MongoDB added support for SSL connections to \fBmongod\fP
-instances in mongofiles\&.
+New in version 2.6.
 
+.sp
+Enables connection to a \fBmongod\fP or \fBmongos\fP that has
+SSL support enabled.
+.sp
+The default distribution of MongoDB does not contain support for SSL.
+For more information on MongoDB and SSL, see http://docs.mongodb.org/manual/tutorial/configure\-ssl\&.
+.UNINDENT
+.INDENT 0.0
+.TP
+.B \-\-sslCAFile <filename>
+New in version 2.6.
+
+.sp
+Specifies the \fB\&.pem\fP file that contains the root certificate chain
+from the Certificate Authority. Specify the file name of the
+\fB\&.pem\fP file using relative or absolute paths.
+.sp
+The default distribution of MongoDB does not contain support for SSL.
+For more information on MongoDB and SSL, see http://docs.mongodb.org/manual/tutorial/configure\-ssl\&.
+.sp
+\fBWARNING:\fP
+.INDENT 7.0
+.INDENT 3.5
+If the \fBmongo\fP shell or any other tool that connects to
+\fBmongos\fP or \fBmongod\fP is run without
+\fI\-\-sslCAFile\fP, it will not attempt to validate
+server certificates. This results in vulnerability to expired
+\fBmongod\fP and \fBmongos\fP certificates as well as to foreign
+processes posing as valid \fBmongod\fP or \fBmongos\fP
+instances. Ensure that you \fIalways\fP specify the CA file against which
+server certificates should be validated in cases where intrusion is a
+possibility.
+.UNINDENT
+.UNINDENT
+.UNINDENT
+.INDENT 0.0
+.TP
+.B \-\-sslPEMKeyFile <filename>
+New in version 2.6.
+
+.sp
+Specifies the \fB\&.pem\fP file that contains both the SSL certificate
+and key. Specify the file name of the \fB\&.pem\fP file using relative
+or absolute paths.
+.sp
+This option is required when using the \fI\-\-ssl\fP option to connect
+to a \fBmongod\fP or \fBmongos\fP that has
+\fBCAFile\fP enabled \fIwithout\fP
+\fBallowConnectionsWithoutCertificates\fP\&.
+.sp
+The default distribution of MongoDB does not contain support for SSL.
+For more information on MongoDB and SSL, see http://docs.mongodb.org/manual/tutorial/configure\-ssl\&.
+.UNINDENT
+.INDENT 0.0
+.TP
+.B \-\-sslPEMKeyPassword <value>
+New in version 2.6.
+
+.sp
+Specifies the password to de\-crypt the certificate\-key file (i.e.
+\fI\-\-sslPEMKeyFile\fP). Use the \fI\-\-sslPEMKeyPassword\fP option only if the
+certificate\-key file is encrypted. In all cases, the \fBmongofiles\fP will
+redact the password from all logging and reporting output.
+.sp
+If the private key in the PEM file is encrypted and you do not specify
+the \fI\-\-sslPEMKeyPassword\fP option, the \fBmongofiles\fP will prompt for a passphrase. See
+\fIssl\-certificate\-password\fP\&.
+.sp
+The default distribution of MongoDB does not contain support for SSL.
+For more information on MongoDB and SSL, see http://docs.mongodb.org/manual/tutorial/configure\-ssl\&.
+.UNINDENT
+.INDENT 0.0
+.TP
+.B \-\-sslCRLFile <filename>
+New in version 2.6.
+
+.sp
+Specifies the \fB\&.pem\fP file that contains the Certificate Revocation
+List. Specify the file name of the \fB\&.pem\fP file using relative or
+absolute paths.
+.sp
+The default distribution of MongoDB does not contain support for SSL.
+For more information on MongoDB and SSL, see http://docs.mongodb.org/manual/tutorial/configure\-ssl\&.
+.UNINDENT
+.INDENT 0.0
+.TP
+.B \-\-sslAllowInvalidCertificates
+New in version 2.6.
+
+.sp
+Bypasses the validation checks for server certificates and allows
+the use of invalid certificates. When using the
+\fBallowInvalidCertificates\fP setting, MongoDB logs as a
+warning the use of the invalid certificate.
+.sp
+The default distribution of MongoDB does not contain support for SSL.
+For more information on MongoDB and SSL, see http://docs.mongodb.org/manual/tutorial/configure\-ssl\&.
+.UNINDENT
+.INDENT 0.0
+.TP
+.B \-\-sslAllowInvalidHostnames
+New in version 3.0.
+
+.sp
+Disables the validation of the hostnames in SSL certificates. Allows
+\fBmongofiles\fP to connect to MongoDB instances if the hostname their
+certificates do not match the specified hostname.
+.UNINDENT
+.INDENT 0.0
+.TP
+.B \-\-sslFIPSMode
+New in version 2.6.
+
+.sp
+Directs the \fBmongofiles\fP to use the FIPS mode of the installed OpenSSL
+library. Your system must have a FIPS compliant OpenSSL library to use
+the \fI\-\-sslFIPSMode\fP option.
 .sp
 \fBNOTE:\fP
 .INDENT 7.0
 .INDENT 3.5
-SSL support in mongofiles is not compiled into the default
-distribution of MongoDB. See
-http://docs.mongodb.org/manual/tutorial/configure\-ssl for more information on SSL
-and MongoDB.
-.sp
-Additionally, mongofiles does not support connections to
-\fBmongod\fP instances that require client certificate
-validation.
+FIPS Compatible SSL is
+available only in \fI\%MongoDB Enterprise\fP\&. See
+http://docs.mongodb.org/manual/tutorial/configure\-fips for more information.
 .UNINDENT
 .UNINDENT
-.sp
-Allows \fBmongofiles\fP to connect to \fBmongod\fP
-instance over an SSL connection.
 .UNINDENT
 .INDENT 0.0
 .TP
 .B \-\-username <username>, \-u <username>
-Specifies a username to authenticate to the MongoDB instance, if your
-database requires authentication. Use in conjunction with the
-\fImongofiles \-\-password\fP option to supply a password.
+Specifies a username with which to authenticate to a MongoDB database
+that uses authentication. Use in conjunction with the \fB\-\-password\fP and
+\fB\-\-authenticationDatabase\fP options.
 .UNINDENT
 .INDENT 0.0
 .TP
 .B \-\-password <password>, \-p <password>
-Specifies a password to authenticate to the MongoDB instance. Use
-in conjunction with the \fImongofiles \-\-username\fP option to
-supply a username.
+Specifies a password with which to authenticate to a MongoDB database
+that uses authentication. Use in conjunction with the \fB\-\-username\fP and
+\fB\-\-authenticationDatabase\fP options.
 .sp
-If you specify a \fI\-\-username\fP and
-do not pass an argument to \fI\-\-password\fP,
-\fBmongofiles\fP will prompt for a password interactively. If
-you do not specify a password on the command line,
-\fI\-\-password\fP must be the last argument specified.
+If you do not specify an argument for \fI\-\-password\fP, \fBmongofiles\fP will
+prompt interactively for a password on the console.
 .UNINDENT
 .INDENT 0.0
 .TP
@@ -173,72 +300,94 @@ you do not specify a password on the command line,
 New in version 2.4.
 
 .sp
-Specifies the database that holds the user\(aqs (e.g
-\fI\-\-username\fP) credentials.
-.sp
-By default, \fBmongofiles\fP assumes that the database specified to the
-\fI\-\-db\fP argument holds the user\(aqs credentials, unless you
-specify \fI\-\-authenticationDatabase\fP\&.
-.sp
-See \fBuserSource\fP,
-http://docs.mongodb.org/manual/reference/privilege\-documents and
-http://docs.mongodb.org/manual/reference/user\-privileges for more information about
-delegated authentication in MongoDB.
+Specifies the database that holds the user\(aqs credentials.
 .UNINDENT
 .INDENT 0.0
 .TP
 .B \-\-authenticationMechanism <name>
+\fIDefault\fP: MONGODB\-CR
+.sp
 New in version 2.4.
 
 .sp
-Specifies the authentication mechanism. By default, the
-authentication mechanism is \fBMONGODB\-CR\fP, which is the MongoDB
-challenge/response authentication mechanism. In MongoDB Enterprise,
-\fBmongofiles\fP also includes support for \fBGSSAPI\fP to handle
-Kerberos authentication.
+Changed in version 2.6: Added support for the \fBPLAIN\fP and \fBMONGODB\-X509\fP authentication
+mechanisms.
+
 .sp
-See http://docs.mongodb.org/manual/tutorial/control\-access\-to\-mongodb\-with\-kerberos\-authentication
-for more information about Kerberos authentication.
+Specifies the authentication mechanism the \fBmongofiles\fP instance uses to
+authenticate to the \fBmongod\fP or \fBmongos\fP\&.
+.TS
+center;
+|l|l|.
+_
+T{
+Value
+T}	T{
+Description
+T}
+_
+T{
+MONGODB\-CR
+T}	T{
+MongoDB challenge/response authentication.
+T}
+_
+T{
+MONGODB\-X509
+T}	T{
+MongoDB SSL certificate authentication.
+T}
+_
+T{
+PLAIN
+T}	T{
+External authentication using LDAP. You can also use \fBPLAIN\fP
+for authenticating in\-database users. \fBPLAIN\fP transmits
+passwords in plain text. This mechanism is available only in
+\fI\%MongoDB Enterprise\fP\&.
+T}
+_
+T{
+GSSAPI
+T}	T{
+External authentication using Kerberos. This mechanism is
+available only in \fI\%MongoDB Enterprise\fP\&.
+T}
+_
+.TE
 .UNINDENT
 .INDENT 0.0
 .TP
-.B \-\-dbpath <path>
-Specifies the directory of the MongoDB data files. If used, the
-\fI\-\-dbpath\fP option enables \fBmongofiles\fP to attach directly to
-local data files interact with the GridFS data without the
-\fBmongod\fP\&. To run with \fI\-\-dbpath\fP, \fBmongofiles\fP needs to lock
-access to the data directory: as a result, no \fBmongod\fP can access
-the same path while the process runs.
+.B \-\-gssapiServiceName
+New in version 2.6.
+
+.sp
+Specify the name of the service using \fBGSSAPI/Kerberos\fP\&. Only required if the service does not use the
+default name of \fBmongodb\fP\&.
+.sp
+This option is available only in MongoDB Enterprise.
 .UNINDENT
 .INDENT 0.0
 .TP
-.B \-\-directoryperdb
-Use the \fI\-\-directoryperdb\fP in conjunction with the corresponding
-option to \fBmongod\fP, which allows \fBmongofiles\fP when
-running with the \fI\-\-dbpath\fP option and MongoDB uses an
-on\-disk format where every database has a distinct
-directory. This option is only relevant when specifying the
-\fI\-\-dbpath\fP option.
+.B \-\-gssapiHostName
+New in version 2.6.
+
+.sp
+Specify the hostname of a service using \fBGSSAPI/Kerberos\fP\&. \fIOnly\fP required if the hostname of a machine does
+not match the hostname resolved by DNS.
+.sp
+This option is available only in MongoDB Enterprise.
 .UNINDENT
 .INDENT 0.0
 .TP
-.B \-\-journal
-Allows \fBmongofiles\fP operations to use the durability
-\fIjournal\fP when running with \fI\-\-dbpath\fP
-to ensure that the database maintains a recoverable state. This
-forces \fBmongofiles\fP to record all data on disk regularly.
-.UNINDENT
-.INDENT 0.0
-.TP
-.B \-\-db <db>, \-d <db>
-Use the \fI\-\-db\fP option to specify the MongoDB database that stores
-or will store the GridFS files.
+.B \-\-db <database>, \-d <database>
+Specifies the name of the database on which to run the \fBmongofiles\fP\&.
 .UNINDENT
 .INDENT 0.0
 .TP
 .B \-\-collection <collection>, \-c <collection>
 This option has no use in this context and a future release may
-remove it. See \fI\%SERVER-4931\fP for more information.
+remove it. See \fI\%SERVER\-4931\fP for more information.
 .UNINDENT
 .INDENT 0.0
 .TP
@@ -246,30 +395,47 @@ remove it. See \fI\%SERVER-4931\fP for more information.
 Specifies the local filesystem name of a file for get and put
 operations.
 .sp
-In the \fBmongofiles put\fP and \fBmongofiles get\fP
-commands the required \fB<filename>\fP modifier refers to the name
-the object will have in GridFS. \fBmongofiles\fP assumes that
-this reflects the file\(aqs name on the local file
-system. This setting overrides this default.
+In the \fBmongofiles put\fP and \fBmongofiles get\fP commands,
+the required \fB<filename>\fP modifier refers to the name the object will
+have in GridFS. \fBmongofiles\fP assumes that this reflects the
+file\(aqs name on the local file system. This setting overrides this
+default.
 .UNINDENT
 .INDENT 0.0
 .TP
-.B \-\-type <MIME>, t <MIME>
-Provides the ability to specify a \fIMIME\fP type to describe the
-file inserted into GridFS storage. \fBmongofiles\fP omits this
-option in the default operation.
+.B \-\-type <MIME>
+Provides the ability to specify a \fIMIME\fP type to describe the file
+inserted into GridFS storage. \fBmongofiles\fP omits this option in
+the default operation.
 .sp
 Use only with \fBmongofiles put\fP operations.
 .UNINDENT
 .INDENT 0.0
 .TP
 .B \-\-replace, \-r
-Alters the behavior of \fBmongofiles put\fP to replace
-existing GridFS objects with the specified local file, rather than
-adding an additional object with the same name.
+Alters the behavior of \fBmongofiles put\fP to replace existing
+GridFS objects with the specified local file, rather than adding an
+additional object with the same name.
 .sp
 In the default operation, files will not be overwritten by a
 \fBmongofiles put\fP option.
+.UNINDENT
+.INDENT 0.0
+.TP
+.B \-\-prefix string
+\fIDefault\fP: fs
+.sp
+GridFS prefix to use.
+.UNINDENT
+.INDENT 0.0
+.TP
+.B \-\-writeConcern <document>
+\fIDefault\fP: majority
+.sp
+Specifies the \fIwrite concern\fP for each write operation that \fBmongofiles\fP
+writes to the target database.
+.sp
+Specify the write concern as a document with \fIw options\fP\&.
 .UNINDENT
 .SH COMMANDS
 .INDENT 0.0
@@ -415,6 +581,6 @@ mongofiles \-d records get 32\-corinth.lp
 .SH AUTHOR
 MongoDB Documentation Project
 .SH COPYRIGHT
-2011-2013, MongoDB, Inc.
+2011-2015
 .\" Generated by docutils manpage writer.
 .

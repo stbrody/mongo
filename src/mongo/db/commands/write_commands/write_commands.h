@@ -36,77 +36,91 @@
 
 namespace mongo {
 
+/**
+ * Base class for write commands.  Write commands support batch writes and write concern,
+ * and return per-item error information.  All write commands use the (non-virtual) entry
+ * point WriteCmd::run().
+ *
+ * Command parsing is performed by the WriteBatch class (command syntax documented there),
+ * and command execution is performed by the WriteBatchExecutor class.
+ */
+class WriteCmd : public Command {
+    MONGO_DISALLOW_COPYING(WriteCmd);
+
+public:
+    virtual ~WriteCmd() {}
+
+protected:
     /**
-     * Base class for write commands.  Write commands support batch writes and write concern,
-     * and return per-item error information.  All write commands use the (non-virtual) entry
-     * point WriteCmd::run().
-     *
-     * Command parsing is performed by the WriteBatch class (command syntax documented there),
-     * and command execution is performed by the WriteBatchExecutor class.
+     * Instantiates a command that can be invoked by "name", which will be capable of issuing
+     * write batches of type "writeType", and will require privilege "action" to run.
      */
-    class WriteCmd : public Command {
-        MONGO_DISALLOW_COPYING(WriteCmd);
-    public:
-        virtual ~WriteCmd() {}
+    WriteCmd(StringData name, BatchedCommandRequest::BatchType writeType);
 
-    protected:
+    // Full log of write command can be quite large.
+    static void redactTooLongLog(mutablebson::Document* cmdObj, StringData fieldName);
 
-        /**
-         * Instantiates a command that can be invoked by "name", which will be capable of issuing
-         * write batches of type "writeType", and will require privilege "action" to run.
-         */
-        WriteCmd( const StringData& name, BatchedCommandRequest::BatchType writeType );
+private:
+    virtual bool slaveOk() const;
 
-    private:
-        virtual bool logTheOp();
+    virtual bool isWriteCommandForConfigServer() const;
 
-        virtual bool slaveOk() const;
+    virtual Status checkAuthForCommand(ClientBasic* client,
+                                       const std::string& dbname,
+                                       const BSONObj& cmdObj);
 
-        virtual LockType locktype() const;
+    virtual bool shouldAffectCommandCounter() const;
 
-        virtual Status checkAuthForCommand( ClientBasic* client,
-                                            const std::string& dbname,
-                                            const BSONObj& cmdObj );
+    // Write command entry point.
+    virtual bool run(OperationContext* txn,
+                     const std::string& dbname,
+                     BSONObj& cmdObj,
+                     int options,
+                     std::string& errmsg,
+                     BSONObjBuilder& result);
 
-        virtual bool shouldAffectCommandCounter() const;
+    // Write commands can be explained.
+    virtual Status explain(OperationContext* txn,
+                           const std::string& dbname,
+                           const BSONObj& cmdObj,
+                           ExplainCommon::Verbosity verbosity,
+                           BSONObjBuilder* out) const;
 
-        // Write command entry point.
-        virtual bool run(const string& dbname,
-                 BSONObj& cmdObj,
-                 int options,
-                 string& errmsg,
-                 BSONObjBuilder& result,
-                 bool fromRepl);
+    // Type of batch (e.g. insert).
+    BatchedCommandRequest::BatchType _writeType;
+};
 
-        // Type of batch (e.g. insert).
-        BatchedCommandRequest::BatchType _writeType;
-    };
+class CmdInsert : public WriteCmd {
+    MONGO_DISALLOW_COPYING(CmdInsert);
 
-    class CmdInsert : public WriteCmd {
-        MONGO_DISALLOW_COPYING(CmdInsert);
-    public:
-        CmdInsert();
+public:
+    CmdInsert();
+    void redactForLogging(mutablebson::Document* cmdObj);
 
-    private:
-        virtual void help(stringstream& help) const;
-    };
+private:
+    virtual void help(std::stringstream& help) const;
+};
 
-    class CmdUpdate : public WriteCmd {
-        MONGO_DISALLOW_COPYING(CmdUpdate);
-    public:
-        CmdUpdate();
+class CmdUpdate : public WriteCmd {
+    MONGO_DISALLOW_COPYING(CmdUpdate);
 
-    private:
-        virtual void help(stringstream& help) const;
-    };
+public:
+    CmdUpdate();
+    void redactForLogging(mutablebson::Document* cmdObj);
 
-    class CmdDelete : public WriteCmd {
-        MONGO_DISALLOW_COPYING(CmdDelete);
-    public:
-        CmdDelete();
+private:
+    virtual void help(std::stringstream& help) const;
+};
 
-    private:
-        virtual void help(stringstream& help) const;
-    };
+class CmdDelete : public WriteCmd {
+    MONGO_DISALLOW_COPYING(CmdDelete);
 
-} // namespace mongo
+public:
+    CmdDelete();
+    void redactForLogging(mutablebson::Document* cmdObj);
+
+private:
+    virtual void help(std::stringstream& help) const;
+};
+
+}  // namespace mongo

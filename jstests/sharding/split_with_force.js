@@ -2,8 +2,7 @@
 // Tests autosplit locations with force : true
 //
 
-var options = { separateConfig : true, 
-                chunksize : 1, // MB
+var options = { chunksize : 1, // MB
                 mongosOptions : { noAutoSplit : "" }
               };
 
@@ -22,17 +21,19 @@ assert( admin.runCommand({ split : coll + "", middle : { _id : 0 } }).ok );
 
 jsTest.log( "Insert a bunch of data into a chunk of the collection..." );
 
+var bulk = coll.initializeUnorderedBulkOp();
 for ( var i = 0; i < (250 * 1000) + 10; i++ ) {
-    coll.insert({ _id : i });
+    bulk.insert({ _id : i });
 }
-assert.eq( null, coll.getDB().getLastError() );
+assert.writeOK(bulk.execute());
 
 jsTest.log( "Insert a bunch of data into the rest of the collection..." );
 
+bulk = coll.initializeUnorderedBulkOp();
 for ( var i = 1; i <= (250 * 1000); i++ ) {
-    coll.insert({ _id : -i });
+    bulk.insert({ _id: -i });
 }
-assert.eq( null, coll.getDB().getLastError() );
+assert.writeOK(bulk.execute());
 
 jsTest.log( "Get split points of the chunk using force : true..." );
 

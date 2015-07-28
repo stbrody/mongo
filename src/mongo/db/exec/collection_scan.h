@@ -1,5 +1,5 @@
 /**
- *    Copyright (C) 2013 10gen Inc.
+ *    Copyright (C) 2013-2014 MongoDB Inc.
  *
  *    This program is free software: you can redistribute it and/or  modify
  *    it under the terms of the GNU Affero General Public License, version 3,
@@ -28,54 +28,82 @@
 
 #pragma once
 
-#include "mongo/db/diskloc.h"
+#include <memory>
+
 #include "mongo/db/exec/collection_scan_common.h"
 #include "mongo/db/exec/plan_stage.h"
 #include "mongo/db/matcher/expression.h"
-#include "mongo/db/structure/collection_iterator.h"
+#include "mongo/db/record_id.h"
 
 namespace mongo {
 
-    class WorkingSet;
+class RecordCursor;
+class WorkingSet;
+class OperationContext;
 
+/**
+ * Scans over a collection, starting at the RecordId provided in params and continuing until
+ * there are no more records in the collection.
+ *
+ * Preconditions: Valid RecordId.
+ */
+class CollectionScan : public PlanStage {
+public:
+    CollectionScan(OperationContext* txn,
+                   const CollectionScanParams& params,
+                   WorkingSet* workingSet,
+                   const MatchExpression* filter);
+
+    virtual StageState work(WorkingSetID* out);
+    virtual bool isEOF();
+
+    virtual void doInvalidate(OperationContext* txn, const RecordId& dl, InvalidationType type);
+    virtual void doSaveState();
+    virtual void doRestoreState();
+    virtual void doDetachFromOperationContext();
+    virtual void doReattachToOperationContext(OperationContext* opCtx);
+
+    virtual StageType stageType() const {
+        return STAGE_COLLSCAN;
+    }
+
+    virtual std::unique_ptr<PlanStageStats> getStats();
+
+    virtual const SpecificStats* getSpecificStats() const;
+
+    static const char* kStageType;
+
+private:
     /**
-     * Scans over a collection, starting at the DiskLoc provided in params and continuing until
-     * there are no more records in the collection.
-     *
-     * Preconditions: Valid DiskLoc.
+     * If the member (with id memberID) passes our filter, set *out to memberID and return that
+     * ADVANCED.  Otherwise, free memberID and return NEED_TIME.
      */
-    class CollectionScan : public PlanStage {
-    public:
-        CollectionScan(const CollectionScanParams& params,
-                       WorkingSet* workingSet,
-                       const MatchExpression* filter);
+    StageState returnIfMatches(WorkingSetMember* member, WorkingSetID memberID, WorkingSetID* out);
 
-        virtual StageState work(WorkingSetID* out);
-        virtual bool isEOF();
+    // transactional context for read locks. Not owned by us
+    OperationContext* _txn;
 
-        virtual void invalidate(const DiskLoc& dl, InvalidationType type);
-        virtual void prepareToYield();
-        virtual void recoverFromYield();
+    // WorkingSet is not owned by us.
+    WorkingSet* _workingSet;
 
-        virtual PlanStageStats* getStats();
+    // The filter is not owned by us.
+    const MatchExpression* _filter;
 
-    private:
-        // WorkingSet is not owned by us.
-        WorkingSet* _workingSet;
+    std::unique_ptr<RecordCursor> _cursor;
 
-        // The filter is not owned by us.
-        const MatchExpression* _filter;
+    CollectionScanParams _params;
 
-        scoped_ptr<CollectionIterator> _iter;
+    bool _isDead;
 
-        CollectionScanParams _params;
+    RecordId _lastSeenId;  // Null if nothing has been returned from _cursor yet.
 
-        // True if nsdetails(_ns) == NULL on our first call to work.
-        bool _nsDropped;
+    // We allocate a working set member with this id on construction of the stage. It gets used for
+    // all fetch requests. This should only be used for passing up the Fetcher for a NEED_YIELD, and
+    // should remain in the INVALID state.
+    const WorkingSetID _wsidForFetch;
 
-        // Stats
-        CommonStats _commonStats;
-        CollectionScanStats _specificStats;
-    };
+    // Stats
+    CollectionScanStats _specificStats;
+};
 
 }  // namespace mongo

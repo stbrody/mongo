@@ -3,6 +3,7 @@
 // Set up a sharding test.
 s = new ShardingTest( "aggregation_sort1", 2, 0, 2 );
 s.adminCommand( { enablesharding:"test" } );
+s.ensurePrimaryShard('test', 'shard0001');
 s.adminCommand( { shardcollection:"test.data", key:{ _id:1 } } );
 
 // Test does it's own balancing.
@@ -15,7 +16,6 @@ N = 100;
 for( i = 0; i < N; ++i ) {
     d.data.insert( { _id:i } )
 }
-d.getLastError();
 
 // Split the data into 3 chunks.
 s.adminCommand( { split:"test.data", middle:{ _id:33 } } );
