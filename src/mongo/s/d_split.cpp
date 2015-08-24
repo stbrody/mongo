@@ -200,7 +200,7 @@ public:
                 ostringstream os;
                 os << "found missing value in key " << currKey << " for doc: "
                    << (obj.hasField("_id") ? obj.toString() : obj["_id"].toString());
-                log() << "checkShardingIndex for '" << nss << "' failed: " << os.str();
+                log() << "checkShardingIndex for '" << nss.toString() << "' failed: " << os.str();
 
                 errmsg = os.str();
                 return false;
@@ -374,8 +374,8 @@ public:
                 return true;
             }
 
-            log() << "request split points lookup for chunk " << nss << " " << min << " -->> "
-                  << max;
+            log() << "request split points lookup for chunk " << nss.toString() << " " << min <<
+                    " -->> " << max;
 
             // We'll use the average object size and number of object to find approximately how many
             // keys each chunk should have. We'll split at half the maxChunkSize or maxChunkObjects,
@@ -444,7 +444,7 @@ public:
                     // Stop if we have enough split points.
                     if (maxSplitPoints && (numChunks >= maxSplitPoints)) {
                         log() << "max number of requested split points reached (" << numChunks
-                              << ") before the end of chunk " << nss << " " << min << " -->> "
+                              << ") before the end of chunk " << nss.toString() << " " << min << " -->> "
                               << max;
                         break;
                     }
@@ -488,7 +488,7 @@ public:
             for (set<BSONObj>::const_iterator it = tooFrequentKeys.begin();
                  it != tooFrequentKeys.end();
                  ++it) {
-                warning() << "possible low cardinality key detected in " << nss << " - key is "
+                warning() << "possible low cardinality key detected in " << nss.toString() << " - key is "
                           << prettyKey(idx->keyPattern(), *it);
             }
 
@@ -496,7 +496,7 @@ public:
             splitKeys.erase(splitKeys.begin());
 
             if (timer.millis() > serverGlobalParams.slowMS) {
-                warning() << "Finding the split vector for " << nss << " over " << keyPattern
+                warning() << "Finding the split vector for " << nss.toString() << " over " << keyPattern
                           << " keyCount: " << keyCount << " numSplits: " << splitKeys.size()
                           << " lookedAt: " << currCount << " took " << timer.millis() << "ms";
             }
@@ -557,7 +557,7 @@ public:
 
         const NamespaceString nss = NamespaceString(parseNs(dbname, cmdObj));
         if (!nss.isValid()) {
-            errmsg = str::stream() << "invalid namespace '" << nss << "' specified for command";
+            errmsg = str::stream() << "invalid namespace '" << nss.toString() << "' specified for command";
             return false;
         }
 
@@ -625,11 +625,11 @@ public:
         //
 
         const string whyMessage(str::stream() << "splitting chunk [" << minKey << ", " << maxKey
-                                              << ") in " << nss);
+                                              << ") in " << nss.toString());
         auto scopedDistLock = grid.catalogManager(txn)->distLock(nss.ns(), whyMessage);
 
         if (!scopedDistLock.isOK()) {
-            errmsg = str::stream() << "could not acquire collection lock for " << nss
+            errmsg = str::stream() << "could not acquire collection lock for " << nss.toString()
                                    << " to split chunk [" << minKey << "," << maxKey << ")"
                                    << causedBy(scopedDistLock.getStatus());
             warning() << errmsg;
@@ -862,7 +862,7 @@ public:
 
             Collection* const collection = autoColl.getCollection();
             if (!collection) {
-                warning() << "will not perform top-chunk checking since " << nss
+                warning() << "will not perform top-chunk checking since " << nss.toString()
                           << " does not exist after splitting";
                 return true;
             }

@@ -333,7 +333,7 @@ bool MigrationSourceManager::storeCurrentLocs(OperationContext* txn,
 
     if (idx == NULL) {
         errmsg = str::stream() << "can't find index with prefix " << _shardKeyPattern
-                               << " in storeCurrentLocs for " << _nss;
+                               << " in storeCurrentLocs for " << _nss.toString();
         return false;
     }
 
@@ -450,7 +450,7 @@ bool MigrationSourceManager::clone(OperationContext* txn, string& errmsg, BSONOb
 
         Collection* collection = autoColl.getCollection();
         if (!collection) {
-            errmsg = str::stream() << "collection " << _nss << " does not exist";
+            errmsg = str::stream() << "collection " << _nss.toString() << " does not exist";
             return false;
         }
 
@@ -473,7 +473,7 @@ bool MigrationSourceManager::clone(OperationContext* txn, string& errmsg, BSONOb
         // TODO: fix SERVER-16540 race
         Collection* collection = autoColl.getCollection();
         if (!collection) {
-            errmsg = str::stream() << "collection " << _nss << " does not exist";
+            errmsg = str::stream() << "collection " << _nss.toString() << " does not exist";
             return false;
         }
 

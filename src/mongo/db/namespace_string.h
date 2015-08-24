@@ -269,11 +269,6 @@ private:
     size_t _dotIndex;
 };
 
-template <typename StreamType>
-StreamType& operator<<(StreamType& stream, const NamespaceString& value) {
-    return stream << value.ns();
-}
-
 // "database.a.b.c" -> "database"
 inline StringData nsToDatabaseSubstring(StringData ns) {
     size_t i = ns.find('.');
