@@ -242,7 +242,14 @@ public:
     ~ClusterCursorManager();
 
     /**
-     * Registers the given cursor with this manager, and returns the registered cursor's id.
+     * Kills and reaps all cursors currently owned by this cursor manager, and puts the manager
+     * into the shutting down state where it will not accept any new cursors for registration.
+     */
+    void shutdown();
+
+    /**
+     * Registers the given cursor with this manager, and returns the registered cursor's id, or
+     * a non-OK status if something went wrong.
      *
      * 'cursor' must be non-null.  'cursorType' should reflect whether or not the cursor is
      * operating on a sharded namespace (this will be used for reporting purposes).
@@ -251,10 +258,10 @@ public:
      *
      * Does not block.
      */
-    CursorId registerCursor(std::unique_ptr<ClusterClientCursor> cursor,
-                            const NamespaceString& nss,
-                            CursorType cursorType,
-                            CursorLifetime cursorLifetime);
+    StatusWith<CursorId> registerCursor(std::unique_ptr<ClusterClientCursor> cursor,
+                                        const NamespaceString& nss,
+                                        CursorType cursorType,
+                                        CursorLifetime cursorLifetime);
 
     /**
      * Moves the given cursor to the 'pinned' state, and transfers ownership of the cursor to the
@@ -505,6 +512,8 @@ private:
 
     // Synchronizes access to all private state variables below.
     mutable stdx::mutex _mutex;
+
+    bool _inShutdown{false};
 
     // Randomness source.  Used for cursor id generation.
     PseudoRandom _pseudoRandom;

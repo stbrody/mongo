@@ -61,6 +61,7 @@
 #include "mongo/s/balance.h"
 #include "mongo/s/catalog/forwarding_catalog_manager.h"
 #include "mongo/s/client/shard_connection.h"
+#include "mongo/s/client/shard_registry.h"
 #include "mongo/s/client/sharding_connection_hook.h"
 #include "mongo/s/config.h"
 #include "mongo/s/grid.h"
@@ -453,13 +454,10 @@ void mongo::exitCleanly(ExitCode code) {
             txn = uniqueTxn.get();
         }
 
-        auto catalogMgr = grid.catalogManager(txn);
-        if (catalogMgr) {
-            catalogMgr->shutDown(txn);
-            auto cursorManager = grid.getCursorManager();
-            cursorManager->killAllCursors();
-            cursorManager->reapZombieCursors();
-        }
+        auto cursorManager = grid.getCursorManager();
+        cursorManager->shutdown();
+        grid.shardRegistry()->shutdown();
+        grid.catalogManager(txn)->shutDown(txn);
     }
 
     mongo::dbexit(code);

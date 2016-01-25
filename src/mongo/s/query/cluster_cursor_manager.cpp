@@ -181,14 +181,30 @@ ClusterCursorManager::~ClusterCursorManager() {
     invariant(_namespaceToContainerMap.empty());
 }
 
-CursorId ClusterCursorManager::registerCursor(std::unique_ptr<ClusterClientCursor> cursor,
-                                              const NamespaceString& nss,
-                                              CursorType cursorType,
-                                              CursorLifetime cursorLifetime) {
+void ClusterCursorManager::shutdown() {
+    {
+        stdx::lock_guard<stdx::mutex> lk(_mutex);
+        _inShutdown = true;
+    }
+    killAllCursors();
+    reapZombieCursors();
+}
+
+StatusWith<CursorId> ClusterCursorManager::registerCursor(
+    std::unique_ptr<ClusterClientCursor> cursor,
+    const NamespaceString& nss,
+    CursorType cursorType,
+    CursorLifetime cursorLifetime) {
     // Read the clock out of the lock.
     const auto now = _clockSource->now();
 
     stdx::lock_guard<stdx::mutex> lk(_mutex);
+
+    if (_inShutdown) {
+        cursor->kill();
+        return Status(ErrorCodes::ShutdownInProgress,
+                      "Cannot register new cursors as we are in the process of shutting down");
+    }
 
     invariant(cursor);
 
@@ -237,6 +253,11 @@ StatusWith<ClusterCursorManager::PinnedCursor> ClusterCursorManager::checkOutCur
     const auto now = _clockSource->now();
 
     stdx::lock_guard<stdx::mutex> lk(_mutex);
+
+    if (_inShutdown) {
+        return Status(ErrorCodes::ShutdownInProgress,
+                      "Cannot check out cursor as we are in the process of shutting down");
+    }
 
     CursorEntry* entry = getEntry_inlock(nss, cursorId);
     if (!entry) {
