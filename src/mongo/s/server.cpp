@@ -237,6 +237,11 @@ static ExitCode runMongosServer() {
         auto txn = cc().makeOperationContext();
         Status status = initializeSharding(txn.get());
         if (!status.isOK()) {
+            if (status == ErrorCodes::CallbackCanceled) {
+                invariant(inShutdown());
+                log() << "Shutdown called before mongos finished starting up";
+                return EXIT_CLEAN;
+            }
             error() << "Error initializing sharding system: " << status;
             return EXIT_SHARDING_ERROR;
         }
