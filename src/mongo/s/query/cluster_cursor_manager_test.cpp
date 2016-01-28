@@ -818,7 +818,7 @@ TEST_F(ClusterCursorManagerTest, DoNotReapKilledPinnedCursors) {
     ASSERT(isMockCursorKilled(0));
 }
 
-TEST_F(ClusterCursorManagerTest, Shutdown) {
+TEST_F(ClusterCursorManagerTest, CannotRegisterCursorDuringShutdown) {
     ASSERT_OK(getManager()->registerCursor(allocateMockCursor(),
                                            nss,
                                            ClusterCursorManager::CursorType::NamespaceNotSharded,
@@ -835,6 +835,22 @@ TEST_F(ClusterCursorManagerTest, Shutdown) {
                                      nss,
                                      ClusterCursorManager::CursorType::NamespaceNotSharded,
                                      ClusterCursorManager::CursorLifetime::Mortal));
+}
+
+TEST_F(ClusterCursorManagerTest, CannotCheckoutCursorDuringShutdown) {
+    auto cursorId = assertGet(
+        getManager()->registerCursor(allocateMockCursor(),
+                                     nss,
+                                     ClusterCursorManager::CursorType::NamespaceNotSharded,
+                                     ClusterCursorManager::CursorLifetime::Mortal));
+    ASSERT(!isMockCursorKilled(0));
+
+    getManager()->shutdown();
+
+    ASSERT(isMockCursorKilled(0));
+
+    ASSERT_EQUALS(ErrorCodes::ShutdownInProgress,
+                  getManager()->checkOutCursor(nss, std::move(cursorId)).getStatus());
 }
 
 }  // namespace

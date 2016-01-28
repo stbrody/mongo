@@ -182,10 +182,10 @@ ClusterCursorManager::~ClusterCursorManager() {
 }
 
 void ClusterCursorManager::shutdown() {
-    {
-        stdx::lock_guard<stdx::mutex> lk(_mutex);
-        _inShutdown = true;
-    }
+    stdx::unique_lock<stdx::mutex> lk(_mutex);
+    _inShutdown = true;
+    lk.unlock();
+
     killAllCursors();
     reapZombieCursors();
 }
@@ -198,9 +198,10 @@ StatusWith<CursorId> ClusterCursorManager::registerCursor(
     // Read the clock out of the lock.
     const auto now = _clockSource->now();
 
-    stdx::lock_guard<stdx::mutex> lk(_mutex);
+    stdx::unique_lock<stdx::mutex> lk(_mutex);
 
     if (_inShutdown) {
+        lk.unlock();
         cursor->kill();
         return Status(ErrorCodes::ShutdownInProgress,
                       "Cannot register new cursors as we are in the process of shutting down");

@@ -256,6 +256,8 @@ public:
      * 'cursorLifetime' should reflect whether or not this cursor should be immune from the idle
      * cursor destruction procedure.
      *
+     * On an error return, kills 'cursor'.
+     *
      * Does not block.
      */
     StatusWith<CursorId> registerCursor(std::unique_ptr<ClusterClientCursor> cursor,
