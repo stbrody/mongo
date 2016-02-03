@@ -8,6 +8,7 @@
  * @tags: [requires_persistence]
  */
 load("jstests/replsets/rslib.js");
+load("jstests/libs/csrs_upgrade_util.js");
 
 var st;
 (function() {
