@@ -221,7 +221,8 @@ Status ForwardingCatalogManager::scheduleReplaceCatalogManagerIfNeeded(
     return scheduleReplaceCatalogManagerIfNeeded(desiredMode, csrsConnStr);
 }
 
-Status ForwardingCatalogManager::scheduleReplaceCatalogManagerIfNeeded(ConfigServerMode desiredMode, const ConnectionString& csrsConnStr) {
+Status ForwardingCatalogManager::scheduleReplaceCatalogManagerIfNeeded(
+    ConfigServerMode desiredMode, const ConnectionString& csrsConnStr) {
     stdx::lock_guard<stdx::mutex> lk(_observerMutex);
     const auto currentMode = _actual->getMode();
     if (currentMode == desiredMode) {
@@ -238,7 +239,8 @@ Status ForwardingCatalogManager::scheduleReplaceCatalogManagerIfNeeded(ConfigSer
     if (_nextConfigChangeComplete.isValid()) {
         if (_nextConfigConnectionString.getSetName() != csrsConnStr.getSetName()) {
             severe() << "Conflicting new config server replica set names: "
-                     << _nextConfigConnectionString.getSetName() << " vs " << csrsConnStr.getSetName();
+                     << _nextConfigConnectionString.getSetName() << " vs "
+                     << csrsConnStr.getSetName();
             fassertFailed(28788);
         }
     } else {

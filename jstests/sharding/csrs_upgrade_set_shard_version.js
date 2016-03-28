@@ -55,14 +55,22 @@ var st;
     coordinator.allowAllCSRSNodesToVote();
     coordinator.switchToCSRSMode();
 
-    print("!!!0: " + coordinator.getShard(0).adminCommand('serverStatus').sharding.configsvrConnectionString);
-    print("!!!1: " + coordinator.getShard(1).adminCommand('serverStatus').sharding.configsvrConnectionString);
+    print("!!!0: " +
+          coordinator.getShard(0).adminCommand('serverStatus').sharding.configsvrConnectionString);
+    print("!!!1: " +
+          coordinator.getShard(1).adminCommand('serverStatus').sharding.configsvrConnectionString);
 
     assert.commandWorked(coordinator.getMongos(0).adminCommand('flushRouterConfig'));
 
-    assert.eq(40, coordinator.getMongos(0).getCollection(coordinator.getShardedCollectionName()).find().itcount());
+    assert.eq(40,
+              coordinator.getMongos(0)
+                  .getCollection(coordinator.getShardedCollectionName())
+                  .find()
+                  .itcount());
 
-    print("!!!2: " + coordinator.getShard(0).adminCommand('serverStatus').sharding.configsvrConnectionString);
-    print("!!!3: " + coordinator.getShard(1).adminCommand('serverStatus').sharding.configsvrConnectionString);
+    print("!!!2: " +
+          coordinator.getShard(0).adminCommand('serverStatus').sharding.configsvrConnectionString);
+    print("!!!3: " +
+          coordinator.getShard(1).adminCommand('serverStatus').sharding.configsvrConnectionString);
 
 }());
