@@ -55,9 +55,9 @@ var st;
     coordinator.allowAllCSRSNodesToVote();
     coordinator.switchToCSRSMode();
 
-    print("!!!0: " +
+    print("0: Should be SCCC style: " +
           coordinator.getShard(0).adminCommand('serverStatus').sharding.configsvrConnectionString);
-    print("!!!1: " +
+    print("1: Should be SCCC style: " +
           coordinator.getShard(1).adminCommand('serverStatus').sharding.configsvrConnectionString);
 
     assert.commandWorked(coordinator.getMongos(0).adminCommand('flushRouterConfig'));
@@ -68,9 +68,9 @@ var st;
                   .find()
                   .itcount());
 
-    print("!!!2: " +
+    print("2: Should be CSRS style: " +
           coordinator.getShard(0).adminCommand('serverStatus').sharding.configsvrConnectionString);
-    print("!!!3: " +
+    print("3: Should be CSRS style: " +
           coordinator.getShard(1).adminCommand('serverStatus').sharding.configsvrConnectionString);
 
 }());
