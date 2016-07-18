@@ -935,138 +935,170 @@ TEST_F(AddShardTest, AddShardSucceedsEvenIfAddingDBsFromNewShardFails) {
     assertChangeWasLogged(expectedShard);
 }
 
-/*
-TODO(SERVER-24213): Add back tests around adding shard that already exists.
-// Host is already part of an existing shard.
+// Tests both that trying to add a shard with the same host as an existing shard but with different
+// options fails, and that adding a shard with the same host as an existing shard with the *same*
+// options succeeds.
 TEST_F(AddShardTest, AddExistingShardStandalone) {
     std::unique_ptr<RemoteCommandTargeterMock> targeter(
         stdx::make_unique<RemoteCommandTargeterMock>());
-    HostAndPort shardTarget = HostAndPort("host1:12345");
+    HostAndPort shardTarget("StandaloneHost:12345");
     targeter->setConnectionStringReturnValue(ConnectionString(shardTarget));
     targeter->setFindHostReturnValue(shardTarget);
 
     targeterFactory()->addTargeterToReturn(ConnectionString(shardTarget), std::move(targeter));
-    std::string expectedShardName = "StandaloneShard";
 
-    auto future = launchAsync([this, expectedShardName, shardTarget] {
-        auto status =
-            catalogManager()->addShard(operationContext(),
-                                       &expectedShardName,
-                                       assertGet(ConnectionString::parse(shardTarget.toString())),
-                                       100);
-        ASSERT_EQUALS(ErrorCodes::OperationFailed, status);
-        ASSERT_STRING_CONTAINS(status.getStatus().reason(),
-                               "is already a member of the existing shard");
-    });
+    std::string existingShardName = "myShard";
+    ShardType existingShard;
+    existingShard.setName(existingShardName);
+    existingShard.setHost(shardTarget.toString());
+    existingShard.setMaxSizeMB(100);
+    existingShard.setState(ShardType::ShardState::kShardAware);
 
-    ShardType shard;
-    shard.setName("shard0000");
-    shard.setHost(shardTarget.toString());
-    expectGetShards({shard});
+    // Make sure the shard already exists.
+    ASSERT_OK(catalogClient()->insertConfigDocument(operationContext(),
+                                                    ShardType::ConfigNS,
+                                                    existingShard.toBSON(),
+                                                    ShardingCatalogClient::kMajorityWriteConcern));
+    assertShardExists(existingShard);
 
-    future.timed_get(kFutureTimeout);
+    // Adding the same host with a different shard name should fail.
+    std::string differentName = "anotherShardName";
+    ASSERT_EQUALS(ErrorCodes::IllegalOperation,
+                  catalogManager()->addShard(operationContext(),
+                                             &differentName,
+                                             ConnectionString(shardTarget),
+                                             existingShard.getMaxSizeMB()));
+
+    // Ensure that the shard document was unchanged.
+    assertShardExists(existingShard);
+
+    // Adding the same host with a different maxSize should fail.
+    ASSERT_EQUALS(ErrorCodes::IllegalOperation,
+                  catalogManager()->addShard(operationContext(),
+                                             nullptr,
+                                             ConnectionString(shardTarget),
+                                             existingShard.getMaxSizeMB() + 100));
+
+    // Adding the same host but as part of a replica set should fail.
+    ASSERT_EQUALS(
+        ErrorCodes::IllegalOperation,
+        catalogManager()->addShard(operationContext(),
+                                   nullptr,
+                                   ConnectionString::forReplicaSet("mySet", {shardTarget}),
+                                   existingShard.getMaxSizeMB()));
+
+    // Ensure that the shard document was unchanged.
+    assertShardExists(existingShard);
+
+    // Ensure that the shard document was unchanged.
+    assertShardExists(existingShard);
+
+    // Adding the same host with the same options should succeed.
+    auto shardName = assertGet(catalogManager()->addShard(operationContext(),
+                                                          &existingShardName,
+                                                          ConnectionString(shardTarget),
+                                                          existingShard.getMaxSizeMB()));
+    ASSERT_EQUALS(existingShardName, shardName);
+
+    shardName = assertGet(catalogManager()->addShard(
+        operationContext(), nullptr, ConnectionString(shardTarget), existingShard.getMaxSizeMB()));
+    ASSERT_EQUALS(existingShardName, shardName);
+
+    // Ensure that the shard document was unchanged.
+    assertShardExists(existingShard);
 }
 
-
-// Host is already part of an existing replica set shard.
+// Tests both that trying to add a shard with the same replica set as an existing shard but with
+// different options fails, and that adding a shard with the same replica set as an existing shard
+// with the *same* options succeeds.
 TEST_F(AddShardTest, AddExistingShardReplicaSet) {
     std::unique_ptr<RemoteCommandTargeterMock> targeter(
         stdx::make_unique<RemoteCommandTargeterMock>());
     ConnectionString connString =
         assertGet(ConnectionString::parse("mySet/host1:12345,host2:12345"));
-    HostAndPort shardTarget = connString.getServers().front();
-    targeter->setConnectionStringReturnValue(connString);
-    targeter->setFindHostReturnValue(shardTarget);
-
-    targeterFactory()->addTargeterToReturn(connString, std::move(targeter));
-    std::string expectedShardName = "StandaloneShard";
-
-    auto future = launchAsync([this, expectedShardName, connString] {
-        auto status =
-            catalogManager()->addShard(operationContext(), &expectedShardName, connString, 100);
-        ASSERT_EQUALS(ErrorCodes::OperationFailed, status);
-        ASSERT_STRING_CONTAINS(status.getStatus().reason(),
-                               "is already a member of the existing shard");
-    });
-
-    ShardType shard;
-    shard.setName("shard0000");
-    shard.setHost(shardTarget.toString());
-    expectGetShards({shard});
-
-    future.timed_get(kFutureTimeout);
-}
-
-// TODO(SERVER-24213): Test adding a new shard with an existing shard name, but different
-// shard membership
-TEST_F(AddShardTest, ReAddExistingShard) {
-    std::unique_ptr<RemoteCommandTargeterMock> targeter(
-        stdx::make_unique<RemoteCommandTargeterMock>());
-    ConnectionString connString =
-        assertGet(ConnectionString::parse("mySet/host1:12345,host2:12345"));
     targeter->setConnectionStringReturnValue(connString);
     HostAndPort shardTarget = connString.getServers().front();
     targeter->setFindHostReturnValue(shardTarget);
-
     targeterFactory()->addTargeterToReturn(connString, std::move(targeter));
-    std::string expectedShardName = "mySet";
 
-    auto future = launchAsync([this, expectedShardName, connString] {
-        auto status =
-            catalogManager()->addShard(operationContext(), &expectedShardName, connString, 100);
-        ASSERT_OK(status);
-    });
+    std::string existingShardName = "myShard";
+    ShardType existingShard;
+    existingShard.setName(existingShardName);
+    existingShard.setHost(connString.toString());
+    existingShard.setMaxSizeMB(100);
+    existingShard.setState(ShardType::ShardState::kShardAware);
 
-    BSONArrayBuilder hosts;
-    hosts.append("host1:12345");
-    hosts.append("host2:12345");
-    BSONObj commandResponse = BSON("ok" << 1 << "ismaster" << true << "setName"
-                                        << "mySet"
-                                        << "hosts"
-                                        << hosts.arr());
-    expectIsMaster(shardTarget, commandResponse);
+    // Make sure the shard already exists.
+    ASSERT_OK(catalogClient()->insertConfigDocument(operationContext(),
+                                                    ShardType::ConfigNS,
+                                                    existingShard.toBSON(),
+                                                    ShardingCatalogClient::kMajorityWriteConcern));
+    assertShardExists(existingShard);
 
-    expectListDatabases(shardTarget,
-                        {BSON("name"
-                              << "shardDB")});
+    // Adding the same connection string with a different shard name should fail.
+    std::string differentName = "anotherShardName";
+    ASSERT_EQUALS(
+        ErrorCodes::IllegalOperation,
+        catalogManager()->addShard(
+            operationContext(), &differentName, connString, existingShard.getMaxSizeMB()));
 
-    expectGetDatabase("shardDB", boost::none);
+    // Ensure that the shard document was unchanged.
+    assertShardExists(existingShard);
 
-    // The shardIdentity doc inserted into the config.version collection on the shard.
-    expectShardIdentityUpsert(shardTarget, expectedShardName);
+    // Adding the same connection string with a different maxSize should fail.
+    ASSERT_EQUALS(ErrorCodes::IllegalOperation,
+                  catalogManager()->addShard(
+                      operationContext(), nullptr, connString, existingShard.getMaxSizeMB() + 100));
 
-    // The shard doc inserted into the config.shards collection on the config server.
-    ShardType newShard;
-    newShard.setName(expectedShardName);
-    newShard.setMaxSizeMB(100);
-    newShard.setHost(connString.toString());
-    newShard.setState(ShardType::ShardState::kShardAware);
+    // Ensure that the shard document was unchanged.
+    assertShardExists(existingShard);
 
-    // When a shard with the same name already exists, the insert into config.shards will fail
-    // with a duplicate key error on the shard name.
-    onCommand([&newShard](const RemoteCommandRequest& request) {
-        BatchedInsertRequest actualBatchedInsert;
-        std::string errmsg;
-        ASSERT_TRUE(actualBatchedInsert.parseBSON(request.dbname, request.cmdObj, &errmsg));
+    // Adding a connecting string with a host of an existing shard but using a different connection
+    // string type should fail
+    ASSERT_EQUALS(ErrorCodes::IllegalOperation,
+                  catalogManager()->addShard(operationContext(),
+                                             nullptr,
+                                             ConnectionString(shardTarget),
+                                             existingShard.getMaxSizeMB()));
 
-        ASSERT_EQUALS(ShardType::ConfigNS, actualBatchedInsert.getNS().toString());
+    // Ensure that the shard document was unchanged.
+    assertShardExists(existingShard);
 
-        auto inserted = actualBatchedInsert.getDocuments();
-        ASSERT_EQUALS(1U, inserted.size());
+    // Adding a connecting string with the same hosts but a different replica set name should fail.
+    ASSERT_EQUALS(ErrorCodes::IllegalOperation,
+                  catalogManager()->addShard(
+                      operationContext(),
+                      nullptr,
+                      ConnectionString::forReplicaSet("differentSet", connString.getServers()),
+                      existingShard.getMaxSizeMB()));
 
-        ASSERT_EQ(newShard.toBSON(), inserted.front());
+    // Ensure that the shard document was unchanged.
+    assertShardExists(existingShard);
 
-        BatchedCommandResponse response;
-        response.setOk(false);
-        response.setErrCode(ErrorCodes::DuplicateKey);
-        response.setErrMessage("E11000 duplicate key error collection: config.shards");
+    // Adding the same host with the same options should succeed.
+    auto shardName = assertGet(catalogManager()->addShard(
+        operationContext(), &existingShardName, connString, existingShard.getMaxSizeMB()));
+    ASSERT_EQUALS(existingShardName, shardName);
 
-        return response.toBSON();
-    });
+    shardName = assertGet(catalogManager()->addShard(
+        operationContext(), nullptr, connString, existingShard.getMaxSizeMB()));
+    ASSERT_EQUALS(existingShardName, shardName);
 
-    future.timed_get(kFutureTimeout);
+    // Ensure that the shard document was unchanged.
+    assertShardExists(existingShard);
+
+    // Adding the same replica set but different host membership (but otherwise the same options)
+    // should succeed
+    shardName = assertGet(catalogManager()->addShard(
+        operationContext(),
+        nullptr,
+        ConnectionString::forReplicaSet(connString.getSetName(), {HostAndPort{"fakehost1"}}),
+        existingShard.getMaxSizeMB()));
+    ASSERT_EQUALS(existingShardName, shardName);
+
+    // Ensure that the shard document was unchanged.
+    assertShardExists(existingShard);
 }
-*/
 
 }  // namespace
 }  // namespace mongo

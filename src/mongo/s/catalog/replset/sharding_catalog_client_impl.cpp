@@ -636,6 +636,7 @@ StatusWith<repl::OpTimeWith<DatabaseType>> ShardingCatalogClientImpl::_fetchData
 
     auto findStatus = _exhaustiveFindOnConfig(txn,
                                               readPref,
+                                              repl::ReadConcernLevel::kMajorityReadConcern,
                                               NamespaceString(DatabaseType::ConfigNS),
                                               BSON(DatabaseType::name(dbName)),
                                               BSONObj(),
@@ -663,6 +664,7 @@ StatusWith<repl::OpTimeWith<CollectionType>> ShardingCatalogClientImpl::getColle
     OperationContext* txn, const std::string& collNs) {
     auto statusFind = _exhaustiveFindOnConfig(txn,
                                               kConfigReadSelector,
+                                              repl::ReadConcernLevel::kMajorityReadConcern,
                                               NamespaceString(CollectionType::ConfigNS),
                                               BSON(CollectionType::fullNs(collNs)),
                                               BSONObj(),
@@ -701,6 +703,7 @@ Status ShardingCatalogClientImpl::getCollections(OperationContext* txn,
 
     auto findStatus = _exhaustiveFindOnConfig(txn,
                                               kConfigReadSelector,
+                                              repl::ReadConcernLevel::kMajorityReadConcern,
                                               NamespaceString(CollectionType::ConfigNS),
                                               b.obj(),
                                               BSONObj(),
@@ -736,7 +739,7 @@ Status ShardingCatalogClientImpl::getCollections(OperationContext* txn,
 Status ShardingCatalogClientImpl::dropCollection(OperationContext* txn, const NamespaceString& ns) {
     logChange(txn, "dropCollection.start", ns.ns(), BSONObj());
 
-    auto shardsStatus = getAllShards(txn);
+    auto shardsStatus = getAllShards(txn, repl::ReadConcernLevel::kMajorityReadConcern);
     if (!shardsStatus.isOK()) {
         return shardsStatus.getStatus();
     }
@@ -896,8 +899,13 @@ Status ShardingCatalogClientImpl::dropCollection(OperationContext* txn, const Na
 
 StatusWith<BSONObj> ShardingCatalogClientImpl::getGlobalSettings(OperationContext* txn,
                                                                  StringData key) {
-    auto findStatus = _exhaustiveFindOnConfig(
-        txn, kConfigReadSelector, kSettingsNamespace, BSON("_id" << key), BSONObj(), 1);
+    auto findStatus = _exhaustiveFindOnConfig(txn,
+                                              kConfigReadSelector,
+                                              repl::ReadConcernLevel::kMajorityReadConcern,
+                                              kSettingsNamespace,
+                                              BSON("_id" << key),
+                                              BSONObj(),
+                                              1);
     if (!findStatus.isOK()) {
         return findStatus.getStatus();
     }
@@ -964,6 +972,7 @@ Status ShardingCatalogClientImpl::getDatabasesForShard(OperationContext* txn,
                                                        vector<string>* dbs) {
     auto findStatus = _exhaustiveFindOnConfig(txn,
                                               kConfigReadSelector,
+                                              repl::ReadConcernLevel::kMajorityReadConcern,
                                               NamespaceString(DatabaseType::ConfigNS),
                                               BSON(DatabaseType::primary(shardId.toString())),
                                               BSONObj(),
@@ -996,8 +1005,13 @@ Status ShardingCatalogClientImpl::getChunks(OperationContext* txn,
 
     // Convert boost::optional<int> to boost::optional<long long>.
     auto longLimit = limit ? boost::optional<long long>(*limit) : boost::none;
-    auto findStatus = _exhaustiveFindOnConfig(
-        txn, kConfigReadSelector, NamespaceString(ChunkType::ConfigNS), query, sort, longLimit);
+    auto findStatus = _exhaustiveFindOnConfig(txn,
+                                              kConfigReadSelector,
+                                              repl::ReadConcernLevel::kMajorityReadConcern,
+                                              NamespaceString(ChunkType::ConfigNS),
+                                              query,
+                                              sort,
+                                              longLimit);
     if (!findStatus.isOK()) {
         return findStatus.getStatus();
     }
@@ -1031,6 +1045,7 @@ Status ShardingCatalogClientImpl::getTagsForCollection(OperationContext* txn,
 
     auto findStatus = _exhaustiveFindOnConfig(txn,
                                               kConfigReadSelector,
+                                              repl::ReadConcernLevel::kMajorityReadConcern,
                                               NamespaceString(TagsType::ConfigNS),
                                               BSON(TagsType::ns(collectionNs)),
                                               BSON(TagsType::min() << 1),
@@ -1060,8 +1075,13 @@ StatusWith<string> ShardingCatalogClientImpl::getTagForChunk(OperationContext* t
         BSON(TagsType::ns(collectionNs) << TagsType::min() << BSON("$lte" << chunk.getMin())
                                         << TagsType::max()
                                         << BSON("$gte" << chunk.getMax()));
-    auto findStatus = _exhaustiveFindOnConfig(
-        txn, kConfigReadSelector, NamespaceString(TagsType::ConfigNS), query, BSONObj(), 1);
+    auto findStatus = _exhaustiveFindOnConfig(txn,
+                                              kConfigReadSelector,
+                                              repl::ReadConcernLevel::kMajorityReadConcern,
+                                              NamespaceString(TagsType::ConfigNS),
+                                              query,
+                                              BSONObj(),
+                                              1);
     if (!findStatus.isOK()) {
         return findStatus.getStatus();
     }
@@ -1085,10 +1105,11 @@ StatusWith<string> ShardingCatalogClientImpl::getTagForChunk(OperationContext* t
 }
 
 StatusWith<repl::OpTimeWith<std::vector<ShardType>>> ShardingCatalogClientImpl::getAllShards(
-    OperationContext* txn) {
+    OperationContext* txn, repl::ReadConcernLevel readConcern) {
     std::vector<ShardType> shards;
     auto findStatus = _exhaustiveFindOnConfig(txn,
                                               kConfigReadSelector,
+                                              readConcern,
                                               NamespaceString(ShardType::ConfigNS),
                                               BSONObj(),     // no query filter
                                               BSONObj(),     // no sort
@@ -1368,6 +1389,7 @@ Status ShardingCatalogClientImpl::insertConfigDocument(OperationContext* txn,
             auto fetchDuplicate =
                 _exhaustiveFindOnConfig(txn,
                                         ReadPreferenceSetting{ReadPreference::PrimaryOnly},
+                                        repl::ReadConcernLevel::kMajorityReadConcern,
                                         nss,
                                         idField.wrap(),
                                         BSONObj(),
@@ -1474,6 +1496,7 @@ Status ShardingCatalogClientImpl::_checkDbDoesNotExist(OperationContext* txn,
 
     auto findStatus = _exhaustiveFindOnConfig(txn,
                                               kConfigReadSelector,
+                                              repl::ReadConcernLevel::kMajorityReadConcern,
                                               NamespaceString(DatabaseType::ConfigNS),
                                               queryBuilder.obj(),
                                               BSONObj(),
@@ -1579,12 +1602,13 @@ StatusWith<long long> ShardingCatalogClientImpl::_runCountCommandOnConfig(Operat
 StatusWith<repl::OpTimeWith<vector<BSONObj>>> ShardingCatalogClientImpl::_exhaustiveFindOnConfig(
     OperationContext* txn,
     const ReadPreferenceSetting& readPref,
+    repl::ReadConcernLevel readConcern,
     const NamespaceString& nss,
     const BSONObj& query,
     const BSONObj& sort,
     boost::optional<long long> limit) {
     auto response = Grid::get(txn)->shardRegistry()->getConfigShard()->exhaustiveFindOnConfig(
-        txn, readPref, repl::ReadConcernLevel::kMajorityReadConcern, nss, query, sort, limit);
+        txn, readPref, readConcern, nss, query, sort, limit);
     if (!response.isOK()) {
         return response.getStatus();
     }

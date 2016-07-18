@@ -46,7 +46,7 @@
     assert(shard, "shard wasn't found");
     assert.eq("bar", shard._id, "shard has incorrect name");
 
-    // step 2. replica set
+    // step 2. replica set - success
     assert(
         s.admin.runCommand({"addshard": "add_shard2_rs1/" + getHostName() + ":" + master1.port}).ok,
         "failed to add shard in step 2");
@@ -54,44 +54,46 @@
     assert(shard, "shard wasn't found");
     assert.eq("add_shard2_rs1", shard._id, "t2 name");
 
-    // step 3. replica set w/ name given
-    assert(s.admin
-               .runCommand({
-                   "addshard": "add_shard2_rs2/" + getHostName() + ":" + master2.port,
-                   "name": "myshard"
-               })
-               .ok,
-           "failed to add shard in step 4");
-    shard =
-        s.getDB("config").shards.findOne({"_id": {"$nin": ["shard0000", "bar", "add_shard2_rs1"]}});
-    assert(shard, "shard wasn't found");
-    assert.eq("myshard", shard._id, "t3 name");
-
-    // step 4. no name given
+    // step 3. no name given - success
     assert(s.admin.runCommand({"addshard": getHostName() + ":" + conn2.port}).ok,
-           "failed to add shard in step 4");
+           "failed to add shard in step 3");
     shard = s.getDB("config").shards.findOne(
         {"_id": {"$nin": ["shard0000", "bar", "add_shard2_rs1", "myshard"]}});
     assert(shard, "shard wasn't found");
-    assert.eq("shard0001", shard._id, "t4 name");
+    assert.eq("shard0001", shard._id, "t3 name");
 
-    assert.eq(s.getDB("config").shards.count(), 5, "unexpected number of shards");
+    assert.eq(s.getDB("config").shards.count(), 4, "unexpected number of shards");
 
-    // step 5. replica set w/ a wrong host
+    // step 4. replica set w/ a wrong host - failure
     var portWithoutHostRunning = allocatePort();
     assert(
         !s.admin.runCommand({addshard: "add_shard2_rs2/NonExistingHost:" + portWithoutHostRunning})
              .ok,
-        "accepted bad hostname in step 5");
+        "accepted bad hostname in step 4");
 
-    // step 6. replica set w/ mixed wrong/right hosts
+    // step 5. replica set w/ mixed wrong/right hosts - failure
     assert(!s.admin
                 .runCommand({
                     addshard: "add_shard2_rs2/" + getHostName() + ":" + master2.port + ",foo:" +
                         portWithoutHostRunning
                 })
                 .ok,
-           "accepted bad hostname in step 6");
+           "accepted bad hostname in step 5");
+
+    // step 6. replica set w/ name given - success
+    assert(s.admin
+               .runCommand({
+                   "addshard": "add_shard2_rs2/" + getHostName() + ":" + master2.port,
+                   "name": "myshard"
+               })
+               .ok,
+           "failed to add shard in step 6");
+    shard =
+        s.getDB("config").shards.findOne({"_id": {"$nin": ["shard0000", "bar", "add_shard2_rs1"]}});
+    assert(shard, "shard wasn't found");
+    assert.eq("myshard", shard._id, "t6 name");
+
+    assert.eq(s.getDB("config").shards.count(), 5, "unexpected number of shards");
 
     // Cannot add invalid stand alone host.
     assert.commandFailed(s.admin.runCommand({addshard: 'dummy:12345'}));
