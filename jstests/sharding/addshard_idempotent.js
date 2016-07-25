@@ -25,17 +25,17 @@
     shard2.startSet();
     shard2.initiate();
     shard2.getPrimary();  // Wait for there to be a primary
-    var shard2ConnStr = shard2.getURL();
+    var shard2SeedList1 = shard2.name + "/" + shard2.nodes[0].host;
+    var shard2SeedList2 = shard2.name + "/" + shard2.nodes[2].host;
 
-    assert.commandWorked(st.admin.runCommand({addshard: shard2ConnStr, name: "newShard2"}));
+    assert.commandWorked(st.admin.runCommand({addshard: shard2SeedList1, name: "newShard2"}));
 
     // Running the identical addShard command should succeed.
-    assert.commandWorked(st.admin.runCommand({addshard: shard2ConnStr, name: "newShard2"}));
+    assert.commandWorked(st.admin.runCommand({addshard: shard2SeedList1, name: "newShard2"}));
 
     // We can only compare replica sets by their set name, so calling addShard with a different
     // seed list should still be considered a successful no-op.
-    assert.commandWorked(
-        st.admin.runCommand({addshard: "rsShard/fakehost1,fakehost2", name: "newShard2"}));
+    assert.commandWorked(st.admin.runCommand({addshard: shard2SeedList2, name: "newShard2"}));
 
     // Verify that the config.shards collection looks right.
     var shards = st.s.getDB('config').shards.find().toArray();

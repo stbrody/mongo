@@ -939,13 +939,21 @@ TEST_F(AddShardTest, AddShardSucceedsEvenIfAddingDBsFromNewShardFails) {
 // options fails, and that adding a shard with the same host as an existing shard with the *same*
 // options succeeds.
 TEST_F(AddShardTest, AddExistingShardStandalone) {
-    std::unique_ptr<RemoteCommandTargeterMock> targeter(
-        stdx::make_unique<RemoteCommandTargeterMock>());
     HostAndPort shardTarget("StandaloneHost:12345");
-    targeter->setConnectionStringReturnValue(ConnectionString(shardTarget));
-    targeter->setFindHostReturnValue(shardTarget);
+    std::unique_ptr<RemoteCommandTargeterMock> standaloneTargeter(
+        stdx::make_unique<RemoteCommandTargeterMock>());
+    standaloneTargeter->setConnectionStringReturnValue(ConnectionString(shardTarget));
+    standaloneTargeter->setFindHostReturnValue(shardTarget);
+    targeterFactory()->addTargeterToReturn(ConnectionString(shardTarget),
+                                           std::move(standaloneTargeter));
 
-    targeterFactory()->addTargeterToReturn(ConnectionString(shardTarget), std::move(targeter));
+    std::unique_ptr<RemoteCommandTargeterMock> replsetTargeter(
+        stdx::make_unique<RemoteCommandTargeterMock>());
+    replsetTargeter->setConnectionStringReturnValue(
+        ConnectionString::forReplicaSet("mySet", {shardTarget}));
+    replsetTargeter->setFindHostReturnValue(shardTarget);
+    targeterFactory()->addTargeterToReturn(ConnectionString::forReplicaSet("mySet", {shardTarget}),
+                                           std::move(replsetTargeter));
 
     std::string existingShardName = "myShard";
     ShardType existingShard;
@@ -963,46 +971,84 @@ TEST_F(AddShardTest, AddExistingShardStandalone) {
 
     // Adding the same host with a different shard name should fail.
     std::string differentName = "anotherShardName";
-    ASSERT_EQUALS(ErrorCodes::IllegalOperation,
-                  catalogManager()->addShard(operationContext(),
-                                             &differentName,
-                                             ConnectionString(shardTarget),
-                                             existingShard.getMaxSizeMB()));
+    auto future1 = launchAsync([&] {
+        Client::initThreadIfNotAlready();
+        ASSERT_EQUALS(ErrorCodes::IllegalOperation,
+                      catalogManager()->addShard(operationContext(),
+                                                 &differentName,
+                                                 ConnectionString(shardTarget),
+                                                 existingShard.getMaxSizeMB()));
+    });
+    expectIsMaster(shardTarget, BSON("ok" << 1 << "ismaster" << true));
+    future1.timed_get(kFutureTimeout);
 
     // Ensure that the shard document was unchanged.
     assertShardExists(existingShard);
 
     // Adding the same host with a different maxSize should fail.
-    ASSERT_EQUALS(ErrorCodes::IllegalOperation,
-                  catalogManager()->addShard(operationContext(),
-                                             nullptr,
-                                             ConnectionString(shardTarget),
-                                             existingShard.getMaxSizeMB() + 100));
+    auto future2 = launchAsync([&] {
+        Client::initThreadIfNotAlready();
+        ASSERT_EQUALS(ErrorCodes::IllegalOperation,
+                      catalogManager()->addShard(operationContext(),
+                                                 nullptr,
+                                                 ConnectionString(shardTarget),
+                                                 existingShard.getMaxSizeMB() + 100));
+    });
+    expectIsMaster(shardTarget, BSON("ok" << 1 << "ismaster" << true));
+    future2.timed_get(kFutureTimeout);
 
     // Adding the same host but as part of a replica set should fail.
-    ASSERT_EQUALS(
-        ErrorCodes::IllegalOperation,
-        catalogManager()->addShard(operationContext(),
-                                   nullptr,
-                                   ConnectionString::forReplicaSet("mySet", {shardTarget}),
-                                   existingShard.getMaxSizeMB()));
-
-    // Ensure that the shard document was unchanged.
-    assertShardExists(existingShard);
+    auto future3 = launchAsync([&] {
+        Client::initThreadIfNotAlready();
+        ASSERT_EQUALS(
+            ErrorCodes::IllegalOperation,
+            catalogManager()->addShard(operationContext(),
+                                       nullptr,
+                                       ConnectionString::forReplicaSet("mySet", {shardTarget}),
+                                       existingShard.getMaxSizeMB()));
+    });
+    // Make it get past the host validation check (even though if this *really* was a standalone
+    // it wouldn't report it was a replica set here and thus would fail the validation check) to
+    // ensure that even if the user changed the standalone shard to a single-node replica set, you
+    // can't change the sharded cluster's notion of the shard from standalone to replica set just
+    // by calling addShard.
+    expectIsMaster(shardTarget,
+                   BSON("ok" << 1 << "ismaster" << true << "setName"
+                             << "mySet"
+                             << "hosts"
+                             << BSON_ARRAY(shardTarget.toString())));
+    future3.timed_get(kFutureTimeout);
 
     // Ensure that the shard document was unchanged.
     assertShardExists(existingShard);
 
     // Adding the same host with the same options should succeed.
-    auto shardName = assertGet(catalogManager()->addShard(operationContext(),
-                                                          &existingShardName,
-                                                          ConnectionString(shardTarget),
-                                                          existingShard.getMaxSizeMB()));
-    ASSERT_EQUALS(existingShardName, shardName);
+    auto future4 = launchAsync([&] {
+        Client::initThreadIfNotAlready();
+        auto shardName = assertGet(catalogManager()->addShard(operationContext(),
+                                                              &existingShardName,
+                                                              ConnectionString(shardTarget),
+                                                              existingShard.getMaxSizeMB()));
+        ASSERT_EQUALS(existingShardName, shardName);
+    });
+    expectIsMaster(shardTarget, BSON("ok" << 1 << "ismaster" << true));
+    future4.timed_get(kFutureTimeout);
 
-    shardName = assertGet(catalogManager()->addShard(
-        operationContext(), nullptr, ConnectionString(shardTarget), existingShard.getMaxSizeMB()));
-    ASSERT_EQUALS(existingShardName, shardName);
+    // Ensure that the shard document was unchanged.
+    assertShardExists(existingShard);
+
+
+    auto future5 = launchAsync([&] {
+        Client::initThreadIfNotAlready();
+        auto shardName =
+            assertGet(catalogManager()->addShard(operationContext(),
+                                                 nullptr,  // should auto-pick same name
+                                                 ConnectionString(shardTarget),
+                                                 existingShard.getMaxSizeMB()));
+        ASSERT_EQUALS(existingShardName, shardName);
+    });
+    expectIsMaster(shardTarget, BSON("ok" << 1 << "ismaster" << true));
+    future5.timed_get(kFutureTimeout);
 
     // Ensure that the shard document was unchanged.
     assertShardExists(existingShard);
@@ -1012,14 +1058,13 @@ TEST_F(AddShardTest, AddExistingShardStandalone) {
 // different options fails, and that adding a shard with the same replica set as an existing shard
 // with the *same* options succeeds.
 TEST_F(AddShardTest, AddExistingShardReplicaSet) {
-    std::unique_ptr<RemoteCommandTargeterMock> targeter(
+    std::unique_ptr<RemoteCommandTargeterMock> replsetTargeter(
         stdx::make_unique<RemoteCommandTargeterMock>());
-    ConnectionString connString =
-        assertGet(ConnectionString::parse("mySet/host1:12345,host2:12345"));
-    targeter->setConnectionStringReturnValue(connString);
+    ConnectionString connString = assertGet(ConnectionString::parse("mySet/host1:12345"));
+    replsetTargeter->setConnectionStringReturnValue(connString);
     HostAndPort shardTarget = connString.getServers().front();
-    targeter->setFindHostReturnValue(shardTarget);
-    targeterFactory()->addTargeterToReturn(connString, std::move(targeter));
+    replsetTargeter->setFindHostReturnValue(shardTarget);
+    targeterFactory()->addTargeterToReturn(connString, std::move(replsetTargeter));
 
     std::string existingShardName = "myShard";
     ShardType existingShard;
@@ -1035,66 +1080,151 @@ TEST_F(AddShardTest, AddExistingShardReplicaSet) {
                                                     ShardingCatalogClient::kMajorityWriteConcern));
     assertShardExists(existingShard);
 
+    BSONObj isMasterResponse = BSON("ok" << 1 << "ismaster" << true << "setName"
+                                         << "mySet"
+                                         << "hosts"
+                                         << BSON_ARRAY("host1:12345"
+                                                       << "host2:12345"));
+
     // Adding the same connection string with a different shard name should fail.
     std::string differentName = "anotherShardName";
-    ASSERT_EQUALS(
-        ErrorCodes::IllegalOperation,
-        catalogManager()->addShard(
-            operationContext(), &differentName, connString, existingShard.getMaxSizeMB()));
+    auto future1 = launchAsync([&] {
+        Client::initThreadIfNotAlready();
+        ASSERT_EQUALS(
+            ErrorCodes::IllegalOperation,
+            catalogManager()->addShard(
+                operationContext(), &differentName, connString, existingShard.getMaxSizeMB()));
+    });
+    expectIsMaster(shardTarget, isMasterResponse);
+    future1.timed_get(kFutureTimeout);
 
     // Ensure that the shard document was unchanged.
     assertShardExists(existingShard);
 
     // Adding the same connection string with a different maxSize should fail.
-    ASSERT_EQUALS(ErrorCodes::IllegalOperation,
-                  catalogManager()->addShard(
-                      operationContext(), nullptr, connString, existingShard.getMaxSizeMB() + 100));
+    auto future2 = launchAsync([&] {
+        Client::initThreadIfNotAlready();
+        ASSERT_EQUALS(
+            ErrorCodes::IllegalOperation,
+            catalogManager()->addShard(
+                operationContext(), nullptr, connString, existingShard.getMaxSizeMB() + 100));
+    });
+    expectIsMaster(shardTarget, isMasterResponse);
+    future2.timed_get(kFutureTimeout);
 
     // Ensure that the shard document was unchanged.
     assertShardExists(existingShard);
 
     // Adding a connecting string with a host of an existing shard but using a different connection
     // string type should fail
-    ASSERT_EQUALS(ErrorCodes::IllegalOperation,
-                  catalogManager()->addShard(operationContext(),
-                                             nullptr,
-                                             ConnectionString(shardTarget),
-                                             existingShard.getMaxSizeMB()));
+    {
+        // Make sure we can target the request to the standalone server.
+        std::unique_ptr<RemoteCommandTargeterMock> standaloneTargeter(
+            stdx::make_unique<RemoteCommandTargeterMock>());
+        standaloneTargeter->setConnectionStringReturnValue(ConnectionString(shardTarget));
+        standaloneTargeter->setFindHostReturnValue(shardTarget);
+        targeterFactory()->addTargeterToReturn(ConnectionString(shardTarget),
+                                               std::move(standaloneTargeter));
+    }
+    auto future3 = launchAsync([&] {
+        Client::initThreadIfNotAlready();
+        ASSERT_EQUALS(ErrorCodes::IllegalOperation,
+                      catalogManager()->addShard(operationContext(),
+                                                 nullptr,
+                                                 ConnectionString(shardTarget),
+                                                 existingShard.getMaxSizeMB()));
+    });
+    // Make it get past the host validation check (even though if this *really* was a replica set
+    // it would report it was a replica set here and thus would fail the validation check) to
+    // ensure that even if the user changed the replica set shard to a standalone, you
+    // can't change the sharded cluster's notion of the shard from replica set to standalone just
+    // by calling addShard.
+    expectIsMaster(shardTarget, BSON("ok" << 1 << "ismaster" << true));
+    future3.timed_get(kFutureTimeout);
 
     // Ensure that the shard document was unchanged.
     assertShardExists(existingShard);
 
     // Adding a connecting string with the same hosts but a different replica set name should fail.
-    ASSERT_EQUALS(ErrorCodes::IllegalOperation,
-                  catalogManager()->addShard(
-                      operationContext(),
-                      nullptr,
-                      ConnectionString::forReplicaSet("differentSet", connString.getServers()),
-                      existingShard.getMaxSizeMB()));
+    std::string differentSetName = "differentSet";
+    {
+        // Add a targeter with the new replica set name so the validation check can be targeted and
+        // run properly.
+        std::unique_ptr<RemoteCommandTargeterMock> differentRSNameTargeter(
+            stdx::make_unique<RemoteCommandTargeterMock>());
+        ConnectionString differentRSConnString =
+            ConnectionString::forReplicaSet(differentSetName, connString.getServers());
+        differentRSNameTargeter->setConnectionStringReturnValue(differentRSConnString);
+        differentRSNameTargeter->setFindHostReturnValue(shardTarget);
+        targeterFactory()->addTargeterToReturn(differentRSConnString,
+                                               std::move(differentRSNameTargeter));
+    }
+    auto future4 = launchAsync([&] {
+        Client::initThreadIfNotAlready();
+        ASSERT_EQUALS(ErrorCodes::IllegalOperation,
+                      catalogManager()->addShard(operationContext(),
+                                                 nullptr,
+                                                 ConnectionString::forReplicaSet(
+                                                     differentSetName, connString.getServers()),
+                                                 existingShard.getMaxSizeMB()));
+    });
+    BSONObj differentRSIsMasterResponse =
+        BSON("ok" << 1 << "ismaster" << true << "setName" << differentSetName << "hosts"
+                  << BSON_ARRAY("host1:12345"
+                                << "host2:12345"));
+    // Make it get past the validation check (even though if you really tried to add a replica set
+    // with the wrong name it would report the other name in the ismaster response here and thus
+    // would fail the validation check) to ensure that even if you manually change the shard's
+    // replica set name somehow, you can't change the replica set name the sharded cluster knows
+    // for it just by calling addShard again.
+    expectIsMaster(shardTarget, differentRSIsMasterResponse);
+    future4.timed_get(kFutureTimeout);
 
     // Ensure that the shard document was unchanged.
     assertShardExists(existingShard);
 
     // Adding the same host with the same options should succeed.
-    auto shardName = assertGet(catalogManager()->addShard(
-        operationContext(), &existingShardName, connString, existingShard.getMaxSizeMB()));
-    ASSERT_EQUALS(existingShardName, shardName);
+    auto future5 = launchAsync([&] {
+        Client::initThreadIfNotAlready();
+        auto shardName = assertGet(catalogManager()->addShard(
+            operationContext(), &existingShardName, connString, existingShard.getMaxSizeMB()));
+        ASSERT_EQUALS(existingShardName, shardName);
+    });
+    expectIsMaster(shardTarget, isMasterResponse);
+    future5.timed_get(kFutureTimeout);
 
-    shardName = assertGet(catalogManager()->addShard(
-        operationContext(), nullptr, connString, existingShard.getMaxSizeMB()));
-    ASSERT_EQUALS(existingShardName, shardName);
+    auto future6 = launchAsync([&] {
+        Client::initThreadIfNotAlready();
+        auto shardName = assertGet(catalogManager()->addShard(
+            operationContext(), nullptr, connString, existingShard.getMaxSizeMB()));
+        ASSERT_EQUALS(existingShardName, shardName);
+    });
+    expectIsMaster(shardTarget, isMasterResponse);
+    future6.timed_get(kFutureTimeout);
 
     // Ensure that the shard document was unchanged.
     assertShardExists(existingShard);
 
     // Adding the same replica set but different host membership (but otherwise the same options)
     // should succeed
-    shardName = assertGet(catalogManager()->addShard(
-        operationContext(),
-        nullptr,
-        ConnectionString::forReplicaSet(connString.getSetName(), {HostAndPort{"fakehost1"}}),
-        existingShard.getMaxSizeMB()));
-    ASSERT_EQUALS(existingShardName, shardName);
+    auto otherHost = connString.getServers().back();
+    ConnectionString otherHostConnString = assertGet(ConnectionString::parse("mySet/host2:12345"));
+    {
+        // Add a targeter for the different seed string this addShard request will use.
+        std::unique_ptr<RemoteCommandTargeterMock> otherHostTargeter(
+            stdx::make_unique<RemoteCommandTargeterMock>());
+        otherHostTargeter->setConnectionStringReturnValue(otherHostConnString);
+        otherHostTargeter->setFindHostReturnValue(otherHost);
+        targeterFactory()->addTargeterToReturn(otherHostConnString, std::move(otherHostTargeter));
+    }
+    auto future7 = launchAsync([&] {
+        Client::initThreadIfNotAlready();
+        auto shardName = assertGet(catalogManager()->addShard(
+            operationContext(), nullptr, otherHostConnString, existingShard.getMaxSizeMB()));
+        ASSERT_EQUALS(existingShardName, shardName);
+    });
+    expectIsMaster(otherHost, isMasterResponse);
+    future7.timed_get(kFutureTimeout);
 
     // Ensure that the shard document was unchanged.
     assertShardExists(existingShard);

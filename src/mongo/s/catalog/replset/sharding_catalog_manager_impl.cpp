@@ -637,17 +637,6 @@ StatusWith<string> ShardingCatalogManagerImpl::addShard(
     // Only one addShard operation can be in progress at a time.
     Lock::ExclusiveLock lk(txn->lockState(), kZoneOpLock);
 
-    auto existingShard =
-        _checkIfShardExists(txn, shardConnectionString, shardProposedName, maxSize);
-    if (!existingShard.isOK()) {
-        return existingShard.getStatus();
-    }
-    if (existingShard.getValue()) {
-        // These hosts already belong to an existing shard, so report success and terminate the
-        // addShard request.
-        return existingShard.getValue()->getName();
-    }
-
     // TODO: Don't create a detached Shard object, create a detached RemoteCommandTargeter instead.
     const std::shared_ptr<Shard> shard{
         Grid::get(txn)->shardRegistry()->createConnection(shardConnectionString)};
@@ -665,15 +654,29 @@ StatusWith<string> ShardingCatalogManagerImpl::addShard(
         ReplicaSetMonitor::remove(shardConnectionString.getSetName());
         return shardStatus.getStatus();
     }
-
     ShardType& shardType = shardStatus.getValue();
 
+
+    // Check if this shard has already been added (can happen in the case of a retry after a network
+    // error, for example) and thus this addShard request should be considered a no-op.
+    auto existingShard =
+        _checkIfShardExists(txn, shardConnectionString, shardProposedName, maxSize);
+    if (!existingShard.isOK()) {
+        return existingShard.getStatus();
+    }
+    if (existingShard.getValue()) {
+        // These hosts already belong to an existing shard, so report success and terminate the
+        // addShard request.
+        return existingShard.getValue()->getName();
+    }
+
+
+    // Check that none of the existing shard candidate's dbs exist already
     auto dbNamesStatus = _getDBNamesListFromShard(txn, targeter);
     if (!dbNamesStatus.isOK()) {
         return dbNamesStatus.getStatus();
     }
 
-    // Check that none of the existing shard candidate's dbs exist already
     for (const string& dbName : dbNamesStatus.getValue()) {
         auto dbt = _catalogClient->getDatabase(txn, dbName);
         if (dbt.isOK()) {

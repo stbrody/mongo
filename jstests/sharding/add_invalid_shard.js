@@ -26,6 +26,18 @@
 
     assert.commandWorked(st.admin.runCommand({addshard: rsConnStr, name: 'dummyRS'}));
 
+    // Cannot add the same replSet shard host twice when using a unique shard name.
+    assert.commandFailed(st.admin.runCommand({addshard: rsConnStr, name: 'dupRS'}));
+
+    // Cannot add the same stand alone shard host twice with a unique shard name.
+    assert.commandFailed(st.admin.runCommand({addshard: shardDoc.host, name: 'dupShard'}));
+
+    // Cannot add a replica set connection string containing a member that isn't actually part of
+    // the replica set.
+    var truncatedRSConnStr = rsConnStr.substring(0, rsConnStr.indexOf(','));
+    assert.commandFailed(
+        st.admin.runCommand({addshard: truncatedRSConnStr + 'fakehost', name: 'dummyRS'}));
+
     replTest.stopSet();
     st.stop();
 
