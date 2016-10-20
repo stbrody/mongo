@@ -61,7 +61,15 @@ TEST(ArrayMapTest, InsertViaOperatorAt) {
     ASSERT_EQ(3U, map.size());
 }
 
-TEST(ArrayMapTest, Iteration) {}
+TEST(ArrayMapTest, Iteration) {
+    ArrayMap<int, int> map{{1, 11}, {2, 12}, {3, 13}};
+    for (auto& entry : map) {
+        ASSERT_EQ(entry.first + 10, entry.second);
+    }
 
+    for (const auto& entry : map) {
+        ASSERT_EQ(entry.first + 10, entry.second);
+    }
+}
 
 }  // namespace mongo

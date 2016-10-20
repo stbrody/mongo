@@ -28,7 +28,7 @@
 
 #pragma once
 
-#include <tuple>
+#include <utility>
 #include <vector>
 
 namespace mongo {
@@ -36,8 +36,9 @@ namespace mongo {
 template <typename K, typename V>
 class ArrayMap {
 public:
-    using value_type = std::tuple<K, V>;
+    using value_type = std::pair<K, V>;
     using iterator = typename std::vector<value_type>::iterator;
+    using const_iterator = typename std::vector<value_type>::const_iterator;
 
     ArrayMap() = default;
     ArrayMap(std::initializer_list<value_type> values) : _data(values) {}
@@ -50,6 +51,10 @@ public:
         return _data.size();
     }
 
+    void clear() {
+        _data.clear();
+    }
+
     iterator begin() {
         return _data.begin();
     }
@@ -58,19 +63,33 @@ public:
         return _data.end();
     }
 
+    const_iterator cbegin() const {
+        return _data.cbegin();
+    }
+
+    const_iterator cend() const {
+        return _data.cend();
+    }
+
     iterator find(const K& key) {
         return std::find_if(_data.begin(), _data.end(), [&key](const value_type& entry) {
-            return std::get<0>(entry) == key;
+            return entry.first == key;
+        });
+    }
+
+    const_iterator find(const K& key) const {
+        return std::find_if(_data.begin(), _data.end(), [&key](const value_type& entry) {
+            return entry.first == key;
         });
     }
 
     V& operator[](const K& key) {
         auto it = find(key);
         if (it == end()) {
-            _data.push_back(std::make_tuple(key, V{}));
-            return std::get<1>(_data.back());
+            _data.push_back(std::make_pair(key, V{}));
+            return _data.back().second;
         } else {
-            return std::get<1>(*it);
+            return it->second;
         }
     }
 
