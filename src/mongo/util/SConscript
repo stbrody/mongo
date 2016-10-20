@@ -473,6 +473,16 @@ env.CppUnitTest(
     ],
 )
 
+env.CppUnitTest(
+    target="array_map_test",
+    source=[
+        "array_map_test.cpp",
+    ],
+    LIBDEPS=[
+        # None since array_map is header-only.
+    ],
+)
+
 env.Library(
     target='safe_num',
     source=[
