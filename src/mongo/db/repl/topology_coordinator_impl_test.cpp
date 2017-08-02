@@ -2738,7 +2738,7 @@ TEST_F(HeartbeatResponseTestOneRetry, StepDownSelfWhenRemoteNodeWasElectedMoreRe
     ASSERT_TRUE(TopologyCoordinator::Role::leader == getTopoCoord().getRole());
     ASSERT_EQUALS(0, getCurrentPrimaryIndex());
 
-    ASSERT_TRUE(getTopoCoord().stepDownIfPending());
+    getTopoCoord().finishStepDown();
     ASSERT_TRUE(TopologyCoordinator::Role::follower == getTopoCoord().getRole());
     ASSERT_EQUALS(1, getCurrentPrimaryIndex());
 }
@@ -2911,7 +2911,7 @@ TEST_F(HeartbeatResponseTestTwoRetries, StepDownSelfWhenRemoteNodeWasElectedMore
     ASSERT_TRUE(TopologyCoordinator::Role::leader == getTopoCoord().getRole());
     ASSERT_EQUALS(0, getCurrentPrimaryIndex());
 
-    ASSERT_TRUE(getTopoCoord().stepDownIfPending());
+    getTopoCoord().finishStepDown();
     ASSERT_TRUE(TopologyCoordinator::Role::follower == getTopoCoord().getRole());
     ASSERT_EQUALS(1, getCurrentPrimaryIndex());
 }
@@ -3297,7 +3297,7 @@ TEST_F(HeartbeatResponseTest, StepDownSelfWhenRemoteNodeWasElectedMoreRecently) 
     ASSERT_TRUE(TopologyCoordinator::Role::leader == getTopoCoord().getRole());
     ASSERT_EQUALS(0, getCurrentPrimaryIndex());
 
-    ASSERT_TRUE(getTopoCoord().stepDownIfPending());
+    getTopoCoord().finishStepDown();
     ASSERT_TRUE(TopologyCoordinator::Role::follower == getTopoCoord().getRole());
     ASSERT_EQUALS(1, getCurrentPrimaryIndex());
 }
@@ -3931,7 +3931,7 @@ TEST_F(HeartbeatResponseTest, RelinquishPrimaryWhenMajorityOfVotersIsNoLongerVis
     ASSERT_TRUE(TopologyCoordinator::Role::leader == getTopoCoord().getRole());
     ASSERT_EQUALS(0, getCurrentPrimaryIndex());
 
-    ASSERT_TRUE(getTopoCoord().stepDownIfPending());
+    getTopoCoord().finishStepDown();
     ASSERT_TRUE(TopologyCoordinator::Role::follower == getTopoCoord().getRole());
     ASSERT_EQUALS(-1, getCurrentPrimaryIndex());
 }

@@ -144,10 +144,12 @@ public:
 
     virtual Role getRole() const;
     virtual MemberState getMemberState() const;
+    virtual LeaderMode getLeaderMode() const override;
     virtual HostAndPort getSyncSourceAddress() const;
     virtual std::vector<HostAndPort> getMaybeUpHostAndPorts() const;
     virtual int getMaintenanceCount() const;
     virtual long long getTerm();
+    virtual void setLeaderMode(LeaderMode newMode) override;
     virtual UpdateTermResult updateTerm(long long term, Date_t now);
     virtual void setForceSyncSourceIndex(int index);
     virtual HostAndPort chooseNewSyncSource(Date_t now,
@@ -215,9 +217,9 @@ public:
     virtual void processLoseElection();
     virtual Status checkShouldStandForElection(Date_t now) const;
     virtual void setMyHeartbeatMessage(const Date_t now, const std::string& message);
-    virtual bool stepDown(Date_t until, bool force);
-    virtual bool stepDownIfPending();
-    virtual bool isStepDownPending() const;
+    virtual bool stepDown(Date_t until, bool force) override;
+    virtual void prepareForStepDown() override;
+    virtual void finishStepDown() override;
     virtual Date_t getStepDownTime() const;
     virtual rpc::ReplSetMetadata prepareReplSetMetadata(const OpTime& lastVisibleOpTime) const;
     virtual rpc::OplogQueryMetadata prepareOplogQueryMetadata(int rbid) const;
@@ -226,7 +228,6 @@ public:
     virtual void summarizeAsHtml(ReplSetHtmlSummary* output);
     virtual void loadLastVote(const LastVote& lastVote);
     virtual void voteForMyselfV1();
-    virtual void prepareForStepDown();
     virtual void setPrimaryIndex(long long primaryIndex);
     virtual int getCurrentPrimaryIndex() const;
     virtual bool haveNumNodesReachedOpTime(const OpTime& opTime, int numNodes, bool durablyWritten);
@@ -236,7 +237,7 @@ public:
     virtual std::vector<HostAndPort> getHostsWrittenTo(const OpTime& op,
                                                        bool durablyWritten,
                                                        bool skipSelf);
-    virtual HeartbeatResponseAction setMemberAsDown(Date_t now, const int memberIndex);
+    virtual bool setMemberAsDown(Date_t now, const int memberIndex) override;
     virtual std::pair<int, Date_t> getStalestLiveMember() const;
     virtual HeartbeatResponseAction checkMemberTimeouts(Date_t now);
     virtual void resetAllMemberTimeouts(Date_t now);
@@ -450,9 +451,6 @@ private:
     // well.
     std::vector<MemberData> _memberData;
 
-    // Indicates that we've received a request to stepdown from PRIMARY (likely via a heartbeat)
-    bool _stepDownPending;
-
     // Time when stepDown command expires
     Date_t _stepDownUntil;
 
@@ -478,6 +476,9 @@ private:
     // Rather than accesing this variable direclty, one should use the getMemberState() method,
     // which computes the replica set node state on the fly.
     MemberState::MS _followerMode;
+
+    // What type of PRIMARY this node currently is.
+    LeaderMode _leaderMode;
 
     typedef std::map<HostAndPort, PingStats> PingMap;
     // Ping stats for each member by HostAndPort;

@@ -911,6 +911,7 @@ void ReplicationCoordinatorImpl::signalDrainComplete(OperationContext* opCtx,
     invariant(_getMemberState_inlock().primary());
     invariant(!_canAcceptNonLocalWrites);
     _canAcceptNonLocalWrites = true;
+    _topCoord->setLeaderMode(TopologyCoordinator::LeaderMode::kMaster);
 
     lk.unlock();
     OpTime firstOpTime = _externalState->onTransitionToPrimary(opCtx, isV1ElectionProtocol());
@@ -1488,7 +1489,8 @@ Status ReplicationCoordinatorImpl::_awaitReplication_inlock(
                                  "have stepped down."};
         }
 
-        if (_topCoord->isStepDownPending()) {
+        if (_topCoord->getLeaderMode() == TopologyCoordinator::LeaderMode::kSteppingDown ||
+            _topCoord->getLeaderMode() == TopologyCoordinator::LeaderMode::kAttemptingStepDown) {
             return {ErrorCodes::PrimarySteppedDown,
                     "Received stepdown request while waiting for replication"};
         }
@@ -1596,6 +1598,15 @@ Status ReplicationCoordinatorImpl::stepDown(OperationContext* opCtx,
     PostMemberStateUpdateAction action = kActionNone;
     try {
         stdx::unique_lock<stdx::mutex> lk(_mutex);
+
+        if (_topCoord->getLeaderMode() == TopologyCoordinator::LeaderMode::kSteppingDown ||
+            _topCoord->getLeaderMode() == TopologyCoordinator::LeaderMode::kAttemptingStepDown) {
+            return Status{ErrorCodes::ConflictingOperationInProgress,
+                          "This node is already in the process of stepping down"};
+        }
+        invariant(_topCoord->getLeaderMode() == TopologyCoordinator::LeaderMode::kMaster);
+        _topCoord->setLeaderMode(TopologyCoordinator::LeaderMode::kAttemptingStepDown);
+
         opCtx->checkForInterrupt();
         if (!_tryToStepDown_inlock(waitUntil, stepDownUntil, force)) {
             // We send out a fresh round of heartbeats because stepping down successfully

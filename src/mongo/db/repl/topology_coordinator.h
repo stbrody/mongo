@@ -68,6 +68,17 @@ public:
 
     virtual ~TopologyCoordinator();
 
+    /**
+     * Different modes a node can be in while still reporting itself as in state PRIMARY.
+     * TODO(spencer): Add Drain and Catchup modes into this.
+     */
+    enum class LeaderMode {
+        kNotLeader,           // This node is not currently a leader.
+        kMaster,              // This node reports ismaster:true and can accept writes.
+        kSteppingDown,        // This node is in the middle of a stepdown that must complete.
+        kAttemptingStepDown,  // This node is in the middle of a stepdown that might fail.
+    };
+
     ////////////////////////////////////////////////////////////
     //
     // State inspection methods.
@@ -83,6 +94,11 @@ public:
      * Gets the MemberState of this member in the replica set.
      */
     virtual MemberState getMemberState() const = 0;
+
+    /**
+     * Gets what type of PRIMARY this node currently is.
+     */
+    virtual LeaderMode getLeaderMode() const = 0;
 
     /**
      * Returns the address of the current sync source, or an empty HostAndPort if there is no
@@ -114,18 +130,23 @@ public:
 
     enum class UpdateTermResult { kAlreadyUpToDate, kTriggerStepDown, kUpdatedTerm };
 
+    ////////////////////////////////////////////////////////////
+    //
+    // Basic state manipulation methods.
+    //
+    ////////////////////////////////////////////////////////////
+
+    /**
+     * Set what type of PRIMARY this node currently is.
+     */
+    virtual void setLeaderMode(LeaderMode mode) = 0;
+
     /**
      * Sets the latest term this member is aware of to the higher of its current value and
      * the value passed in as "term".
      * Returns the result of setting the term value, or if a stepdown should be triggered.
      */
     virtual UpdateTermResult updateTerm(long long term, Date_t now) = 0;
-
-    ////////////////////////////////////////////////////////////
-    //
-    // Basic state manipulation methods.
-    //
-    ////////////////////////////////////////////////////////////
 
     /**
      * Sets the index into the config used when we next choose a sync source
@@ -398,10 +419,10 @@ public:
                                                        bool skipSelf) = 0;
 
     /**
-     * Marks a member has down from our persepctive and returns a HeartbeatResponseAction, which
-     * will be StepDownSelf if we can no longer see a majority of the nodes.
+     * Marks a member has down from our perspective and returns a bool which indicates if we can no
+     * longer see a majority of the nodes and thus should step down.
      */
-    virtual HeartbeatResponseAction setMemberAsDown(Date_t now, const int memberIndex) = 0;
+    virtual bool setMemberAsDown(Date_t now, const int memberIndex) = 0;
 
     /**
      * Goes through the memberData and determines which member that is currently live
@@ -517,23 +538,24 @@ public:
      * fails and this method returns false.
      *
      * NOTE: It is illegal to call this method if the node is not a primary.
+     * TODO(spencer): Unify with the finishStepDown() method.
      */
     virtual bool stepDown(Date_t until, bool force) = 0;
 
     /**
-     * Sometimes a request to step down comes in (like via a heartbeat), but we don't have the
-     * global exclusive lock so we can't actually stepdown at that moment. When that happens
-     * we record that a stepdown request is pending and schedule work to stepdown in the global
-     * lock.  This method is called after holding the global lock to perform the actual
-     * stepdown, but only if the node hasn't already stepped down another way since the work was
-     * scheduled.  Returns true if it actually steps down, and false otherwise.
+     * Readies the TopologyCoordinator for stepdown.
      */
-    virtual bool stepDownIfPending() = 0;
+    virtual void prepareForStepDown() = 0;
 
     /**
-     * Returns true if a stepdown request is pending on acquisition of the global lock.
+     * Sometimes a request to step down comes in (like via a heartbeat), but we don't have the
+     * global exclusive lock so we can't actually stepdown at that moment. When that happens
+     * we record that a stepdown request is pending (by calling prepareForStepDown()) and schedule
+     * work to stepdown in the global X lock.  This method is called after holding the global lock
+     * to perform the actual stepdown.
+     * TODO(spencer): Unify with the stepDown() method.
      */
-    virtual bool isStepDownPending() const = 0;
+    virtual void finishStepDown() = 0;
 
     /**
      * Considers whether or not this node should stand for election, and returns true
@@ -576,11 +598,6 @@ public:
      * Called only during replication startup. All other updates are done internally.
      */
     virtual void loadLastVote(const LastVote& lastVote) = 0;
-
-    /**
-     * Readies the TopologyCoordinator for stepdown.
-     */
-    virtual void prepareForStepDown() = 0;
 
     /**
      * Updates the current primary index.
