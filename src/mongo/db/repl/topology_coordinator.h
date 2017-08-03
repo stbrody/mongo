@@ -75,8 +75,8 @@ public:
     enum class LeaderMode {
         kNotLeader,           // This node is not currently a leader.
         kMaster,              // This node reports ismaster:true and can accept writes.
-        kSteppingDown,        // This node is in the middle of a stepdown that must complete.
-        kAttemptingStepDown,  // This node is in the middle of a stepdown that might fail.
+        kSteppingDown,        // This node is in the middle of a (hb) stepdown that must complete.
+        kAttemptingStepDown,  // This node is in the middle of a stepdown (cmd) that might fail.
     };
 
     ////////////////////////////////////////////////////////////

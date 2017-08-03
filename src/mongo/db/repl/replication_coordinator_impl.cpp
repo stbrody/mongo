@@ -1606,6 +1606,16 @@ Status ReplicationCoordinatorImpl::stepDown(OperationContext* opCtx,
         }
         invariant(_topCoord->getLeaderMode() == TopologyCoordinator::LeaderMode::kMaster);
         _topCoord->setLeaderMode(TopologyCoordinator::LeaderMode::kAttemptingStepDown);
+        auto guard = MakeGuard([this] {
+            // If when we leave this block we are still in mode kAttemptingStepDown then that means
+            // the stepdown was unsuccessful and we should set our leader state back to the way it
+            // was.
+            if (_topCoord->getLeaderMode() ==
+                TopologyCoordinator::LeaderMode::kAttemptingStepDown) {
+                _topCoord->setLeaderMode(TopologyCoordinator::LeaderMode::kMaster);
+            }
+        });
+
 
         opCtx->checkForInterrupt();
         if (!_tryToStepDown_inlock(waitUntil, stepDownUntil, force)) {
@@ -1613,6 +1623,11 @@ Status ReplicationCoordinatorImpl::stepDown(OperationContext* opCtx,
             // without {force: true} is dependent on timely heartbeat data.
             _restartHeartbeats_inlock();
             do {
+                if (_topCoord->getLeaderMode() == TopologyCoordinator::LeaderMode::kSteppingDown) {
+                    return Status{ErrorCodes::PrimarySteppedDown,
+                                  "While waiting for secondaries to catch up before stepping down, "
+                                  "this node decided to step down for other reasons"};
+                }
                 opCtx->waitForConditionOrInterruptUntil(
                     _stepDownWaiters, lk, std::min(stepDownUntil, waitUntil));
             } while (!_tryToStepDown_inlock(waitUntil, stepDownUntil, force));
