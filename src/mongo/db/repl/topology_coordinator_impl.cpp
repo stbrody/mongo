@@ -1724,7 +1724,7 @@ int TopologyCoordinatorImpl::_getHighestPriorityElectableIndex(Date_t now) const
 void TopologyCoordinatorImpl::prepareForStepDown() {
     // Heartbeat-initiated stepdowns take precedence over stepdown command initiated stepdowns.
     invariant(_leaderMode == LeaderMode::kMaster || _leaderMode == LeaderMode::kAttemptingStepDown);
-    _leaderMode = LeaderMode::kSteppingDown;
+    setLeaderMode(LeaderMode::kSteppingDown);
 }
 
 void TopologyCoordinatorImpl::changeMemberState_forTest(const MemberState& newMemberState,
@@ -1746,7 +1746,7 @@ void TopologyCoordinatorImpl::changeMemberState_forTest(const MemberState& newMe
             _followerMode = newMemberState.s;
             if (_currentPrimaryIndex == _selfIndex) {
                 _currentPrimaryIndex = -1;
-                _leaderMode = LeaderMode::kNotLeader;
+                setLeaderMode(LeaderMode::kNotLeader);
             }
             break;
         case MemberState::RS_STARTUP:
@@ -2598,6 +2598,9 @@ void TopologyCoordinatorImpl::setElectionInfo(OID electionId, Timestamp election
 void TopologyCoordinatorImpl::processWinElection(OID electionId, Timestamp electionOpTime) {
     invariant(_role == Role::candidate);
     _role = Role::leader;
+    // TODO(spencer): Add leader modes for catchup and drain mode, use those here as you're not
+    // truly master yet.
+    setLeaderMode(LeaderMode::kMaster);
     setElectionInfo(electionId, electionOpTime);
     _currentPrimaryIndex = _selfIndex;
     _syncSource = HostAndPort();
@@ -2710,7 +2713,7 @@ void TopologyCoordinatorImpl::_stepDownSelfAndReplaceWith(int newPrimary) {
     invariant(_selfIndex == _currentPrimaryIndex);
     _currentPrimaryIndex = newPrimary;
     _role = Role::follower;
-    _leaderMode = LeaderMode::kNotLeader;
+    setLeaderMode(LeaderMode::kNotLeader);
 }
 
 bool TopologyCoordinatorImpl::updateLastCommittedOpTime() {

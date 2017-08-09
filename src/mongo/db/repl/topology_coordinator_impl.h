@@ -478,7 +478,7 @@ private:
     MemberState::MS _followerMode;
 
     // What type of PRIMARY this node currently is.
-    LeaderMode _leaderMode;
+    LeaderMode _leaderMode = LeaderMode::kNotLeader;
 
     typedef std::map<HostAndPort, PingStats> PingMap;
     // Ping stats for each member by HostAndPort;
