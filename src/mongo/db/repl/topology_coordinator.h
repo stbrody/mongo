@@ -70,10 +70,11 @@ public:
 
     /**
      * Different modes a node can be in while still reporting itself as in state PRIMARY.
-     * TODO(spencer): Add Drain and Catchup modes into this.
+     * TODO(spencer): Split kLeaderElect into separate states for Drain and Catchup modes.
      */
     enum class LeaderMode {
         kNotLeader,           // This node is not currently a leader.
+        kLeaderElect,         // This node has been elected leader, but still can't accept writes.
         kMaster,              // This node reports ismaster:true and can accept writes.
         kSteppingDown,        // This node is in the middle of a (hb) stepdown that must complete.
         kAttemptingStepDown,  // This node is in the middle of a stepdown (cmd) that might fail.

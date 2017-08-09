@@ -910,7 +910,9 @@ void ReplicationCoordinatorImpl::signalDrainComplete(OperationContext* opCtx,
 
     invariant(_getMemberState_inlock().primary());
     invariant(!_canAcceptNonLocalWrites);
+    invariant(_topCoord->getLeaderMode() == TopologyCoordinator::LeaderMode::kLeaderElect);
     _canAcceptNonLocalWrites = true;
+
     _topCoord->setLeaderMode(TopologyCoordinator::LeaderMode::kMaster);
 
     lk.unlock();

@@ -1722,8 +1722,10 @@ int TopologyCoordinatorImpl::_getHighestPriorityElectableIndex(Date_t now) const
 }
 
 void TopologyCoordinatorImpl::prepareForStepDown() {
-    // Heartbeat-initiated stepdowns take precedence over stepdown command initiated stepdowns.
-    invariant(_leaderMode == LeaderMode::kMaster || _leaderMode == LeaderMode::kAttemptingStepDown);
+    // Can only be processing one stepdown request at a time.
+    // Heartbeat-initiated stepdowns take precedence over stepdown command initiated stepdowns, so
+    // it's safe to transition from kAttemptingStepDown to kSteppingDown.
+    invariant(_leaderMode != LeaderMode::kSteppingDown);
     setLeaderMode(LeaderMode::kSteppingDown);
 }
 
@@ -2598,9 +2600,7 @@ void TopologyCoordinatorImpl::setElectionInfo(OID electionId, Timestamp election
 void TopologyCoordinatorImpl::processWinElection(OID electionId, Timestamp electionOpTime) {
     invariant(_role == Role::candidate);
     _role = Role::leader;
-    // TODO(spencer): Add leader modes for catchup and drain mode, use those here as you're not
-    // truly master yet.
-    setLeaderMode(LeaderMode::kMaster);
+    setLeaderMode(LeaderMode::kLeaderElect);
     setElectionInfo(electionId, electionOpTime);
     _currentPrimaryIndex = _selfIndex;
     _syncSource = HostAndPort();
