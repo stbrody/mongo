@@ -358,6 +358,25 @@ public:
     virtual void restoreLockState(const LockSnapshot& stateToRestore) = 0;
 
     /**
+     * Works like restoreLockState but for any global locks in the state to restore, rather than
+     * restoring them into the true LockHead for the global lock resource owned by the LockManager,
+     * restores the global locks into the temporary lock head for the global resource that is
+     * provided.  Locks on resources other than the global lock are restored to their true
+     * LockManager-owned LockHeads.
+     */
+    virtual void restoreLockStateWithTemporaryGlobalLockHead(OperationContext* opCtx,
+                                                             const LockSnapshot& stateToRestore,
+                                                             LockHead* tempGlobalLockHead) = 0;
+
+    /**
+     * Atomically releases the global X lock from the true LockHead for the global resource and
+     * transfers the locks from the 'tempGlobalLockHead' into the true LockHead for the global
+     * resource.
+     */
+    virtual void replaceGlobalLockStateWithTemporaryGlobalLockHead(
+        LockHead* tempGlobalLockHead) = 0;
+
+    /**
      * Releases the ticket associated with the Locker. This allows locks to be held without
      * contributing to reader/writer throttling.
      */

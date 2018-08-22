@@ -88,6 +88,22 @@ public:
     LockResult convert(ResourceId resId, LockRequest* request, LockMode newMode);
 
     /**
+     * Works like lock() above except that it only works for the Global lock and rather than
+     * looking up the true LockHead for the global resource ID, it puts the LockRequest into the
+     * given LockHead, which is guaranteed not to have any conflicting locks for the given request.
+     */
+    void lockGivenUncontestedGlobalLockHead(LockHead* tempGlobalLockHead,
+                                            LockRequest* request,
+                                            LockMode mode);
+
+    /**
+     * Takes the locks from a given LockHead for the Global resource and moves them into the true
+     * LockHead for the global resource, atomically releasing the global X lock from the true
+     * LockHead for the global resource in the process.
+     */
+    void replaceGlobalLocksWithLocksFromLockHead(ResourceId resId, LockHead* tempGlobalLockHead);
+
+    /**
      * Decrements the reference count of a previously locked request and if the reference count
      * becomes zero, removes the request and proceeds to granting any conflicts.
      *
@@ -200,7 +216,7 @@ private:
      *
      * @param lock Lock whose grant state should be recalculated.
      * @param checkConflictQueue Whether to go through the conflict queue. This is an
-     *          optimisation in that we only need to check the conflict queue if one of the
+     *          optimization in that we only need to check the conflict queue if one of the
      *          granted modes, which was conflicting before became zero.
      */
     void _onLockModeChanged(LockHead* lock, bool checkConflictQueue);

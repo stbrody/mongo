@@ -340,6 +340,70 @@ LockManager::~LockManager() {
     delete[] _partitions;
 }
 
+void LockManager::lockGivenUncontestedGlobalLockHead(LockHead* tempGlobalLockHead,
+                                                     LockRequest* request,
+                                                     LockMode mode) {
+    // Sanity check that requests are not being reused without proper cleanup
+    invariant(request->status == LockRequest::STATUS_NEW);
+    invariant(request->recursiveCount == 1);
+    invariant(!request->partitioned);
+    invariant(tempGlobalLockHead->resourceId.getType() == ResourceType::RESOURCE_GLOBAL);
+
+    request->mode = mode;
+    const auto lockResult = tempGlobalLockHead->newRequest(request);
+    invariant(lockResult == LockResult::LOCK_OK);
+}
+
+void LockManager::replaceGlobalLocksWithLocksFromLockHead(ResourceId resId,
+                                                          LockHead* tempGlobalLockHead) {
+    invariant(resId.getType() == ResourceType::RESOURCE_GLOBAL);
+    invariant(tempGlobalLockHead->resourceId == resId);
+
+    LockBucket* bucket = _getBucket(resId);
+    stdx::lock_guard<SimpleMutex> scopedLock(bucket->mutex);
+    LockHead* trueGlobalLockHead = bucket->findOrInsert(resId);
+
+    invariant(trueGlobalLockHead->grantedCounts[MODE_X] == 1);
+    invariant(trueGlobalLockHead->compatibleFirstCount == 1);
+    invariant(tempGlobalLockHead->conflictList.empty());
+
+    LockRequest* existingGlobalLockRequest = trueGlobalLockHead->grantedList._front;
+    invariant(!existingGlobalLockRequest->next);
+    invariant(existingGlobalLockRequest->mode == MODE_X);
+    invariant(existingGlobalLockRequest->status == LockRequest::Status::STATUS_GRANTED);
+
+    // Remove the existing granted MODE_X lock from the trueGlobalLockHead so it can be replaced
+    // by the locks from tempGlobalLockHead.
+    trueGlobalLockHead->grantedList.remove(existingGlobalLockRequest);
+    trueGlobalLockHead->decGrantedModeCount(existingGlobalLockRequest->mode);
+    trueGlobalLockHead->compatibleFirstCount--;
+
+    // Now iterate over the granted LockRequests in the tempGlobalLockHead and transfer them over
+    // to the trueGlobalLockHead.
+    for (LockRequest* it = tempGlobalLockHead->grantedList._front; it != nullptr;) {
+        LockRequest* next = it->next;
+
+        invariant(it->mode == MODE_IX);
+        invariant(it->status == LockRequest::Status::STATUS_GRANTED);
+        invariant(it->lock == tempGlobalLockHead);
+
+        it->lock = trueGlobalLockHead;
+        tempGlobalLockHead->grantedList.remove(it);
+        tempGlobalLockHead->decGrantedModeCount(it->mode);
+        trueGlobalLockHead->grantedList.push_back(it);
+        trueGlobalLockHead->incGrantedModeCount(it->mode);
+
+        it = next;
+    }
+    invariant(tempGlobalLockHead->grantedList.empty());
+    invariant(tempGlobalLockHead->grantedCounts[MODE_X] == 0);
+    invariant(tempGlobalLockHead->grantedModes == 0);
+
+    // Grant any pending requests against the true global lock head that can proceed now that the
+    // global X lock has been released.
+    _onLockModeChanged(trueGlobalLockHead, true);
+}
+
 LockResult LockManager::lock(ResourceId resId, LockRequest* request, LockMode mode) {
     // Sanity check that requests are not being reused without proper cleanup
     invariant(request->status == LockRequest::STATUS_NEW);
