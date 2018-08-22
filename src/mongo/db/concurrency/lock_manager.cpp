@@ -340,6 +340,16 @@ LockManager::~LockManager() {
     delete[] _partitions;
 }
 
+LockResult LockManager::lockGivenLockHead(LockHead* lockHead, LockRequest* request, LockMode mode) {
+    // Sanity check that requests are not being reused without proper cleanup
+    invariant(request->status == LockRequest::STATUS_NEW);
+    invariant(request->recursiveCount == 1);
+    invariant(!request->partitioned);
+
+    request->mode = mode;
+    return lockHead->newRequest(request);
+}
+
 LockResult LockManager::lock(ResourceId resId, LockRequest* request, LockMode mode) {
     // Sanity check that requests are not being reused without proper cleanup
     invariant(request->status == LockRequest::STATUS_NEW);

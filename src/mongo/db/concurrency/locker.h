@@ -358,6 +358,13 @@ public:
     virtual void restoreLockState(const LockSnapshot& stateToRestore) = 0;
 
     /**
+     * TODO
+     */
+    virtual void restoreLockStateWithTemporaryGlobalLockHead(OperationContext* opCtx,
+                                                             const LockSnapshot& stateToRestore,
+                                                             LockHead* tempGlobalLockHead) = 0;
+
+    /**
      * Releases the ticket associated with the Locker. This allows locks to be held without
      * contributing to reader/writer throttling.
      */

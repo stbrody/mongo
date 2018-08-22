@@ -37,6 +37,7 @@
 #include "mongo/config.h"
 #include "mongo/db/concurrency/lock_manager_test_help.h"
 #include "mongo/db/concurrency/locker.h"
+#include "mongo/db/operation_context_noop.h"
 #include "mongo/unittest/unittest.h"
 #include "mongo/util/log.h"
 #include "mongo/util/timer.h"
@@ -657,4 +658,83 @@ TEST(LockerImpl, ConvertLockPendingUnlockAndUnlock) {
     locker.unlockGlobal();
 }
 
+TEST(LockerImpl, TempName) {  // todo test name
+    const ResourceId globalResId(RESOURCE_GLOBAL, ResourceId::SINGLETON_GLOBAL);
+    const ResourceId resIdDatabase(RESOURCE_DATABASE, "TestDB"_sd);
+    const ResourceId resIdCollection1(RESOURCE_COLLECTION, "TestDB.collection1"_sd);
+    const ResourceId resIdCollection2(RESOURCE_COLLECTION, "TestDB.collection2"_sd);
+    const ResourceId resIdCollection3(RESOURCE_COLLECTION, "TestDB.collection2"_sd);
+
+    Locker::LockSnapshot lockInfo1, lockInfo2, lockInfo3;
+    LockerImpl stepUpLocker, txnLocker1, txnLocker2, txnLocker3;
+    OperationContextNoop opCtx1, opCtx2, opCtx3;
+    ON_BLOCK_EXIT([&] {
+        // clean up locks on test completion.
+        stepUpLocker.unlockGlobal();
+        txnLocker1.unlockGlobal();
+        txnLocker2.unlockGlobal();
+        txnLocker3.unlockGlobal();
+    });
+
+    // Take some locks
+    txnLocker1.lockGlobal(&opCtx1, MODE_IX);
+    ASSERT_EQUALS(LOCK_OK, txnLocker1.lock(&opCtx1, resIdDatabase, MODE_IX));
+    ASSERT_EQUALS(LOCK_OK, txnLocker1.lock(&opCtx1, resIdCollection1, MODE_IX));
+    ASSERT_EQUALS(LOCK_OK, txnLocker1.lock(&opCtx1, resIdCollection2, MODE_IX));
+
+    txnLocker2.lockGlobal(&opCtx2, MODE_IX);
+    ASSERT_EQUALS(LOCK_OK, txnLocker2.lock(&opCtx2, resIdDatabase, MODE_IX));
+    ASSERT_EQUALS(LOCK_OK, txnLocker2.lock(&opCtx2, resIdCollection2, MODE_IX));
+
+    txnLocker3.lockGlobal(&opCtx3, MODE_IX);
+    ASSERT_EQUALS(LOCK_OK, txnLocker3.lock(&opCtx3, resIdDatabase, MODE_IX));
+    ASSERT_EQUALS(LOCK_OK, txnLocker3.lock(&opCtx3, resIdCollection3, MODE_IX));
+
+    // Enqueue request for global X lock in stepUpLocker.
+    ASSERT_EQUALS(LockResult::LOCK_WAITING, stepUpLocker.lockGlobalBegin(MODE_X, Date_t::max()));
+
+    // Yield locks on all txn threads.
+    txnLocker1.saveLockStateAndUnlock(&lockInfo1);
+    txnLocker2.saveLockStateAndUnlock(&lockInfo2);
+    txnLocker3.saveLockStateAndUnlock(&lockInfo3);
+
+    // Ensure that stepUpLocker is now able to acquire the global X lock.
+    ASSERT_EQUALS(LockResult::LOCK_OK, stepUpLocker.lockGlobalComplete(Date_t::max()));
+
+    // Atomically release the global X lock from stepUpLocker and restore the lock state for the txn
+    // threads. TODO update comment
+    LockHead tempLockHead;
+    tempLockHead.initNew(globalResId);
+
+    txnLocker1.restoreLockStateWithTemporaryGlobalLockHead(&opCtx1, lockInfo1, &tempLockHead);
+    txnLocker2.restoreLockStateWithTemporaryGlobalLockHead(&opCtx2, lockInfo2, &tempLockHead);
+    txnLocker3.restoreLockStateWithTemporaryGlobalLockHead(&opCtx3, lockInfo3, &tempLockHead);
+
+    // Check that the global lock state was restored successfully into the tempLockHead.
+    invariant(!tempLockHead.grantedList.empty());
+    invariant(tempLockHead.conflictList.empty());
+    invariant(tempLockHead.grantedCounts[MODE_IX] == 3);
+    invariant(tempLockHead.grantedCounts[MODE_X] == 0);
+
+    // Check that the global lock state wasn't restored into the true lock manager state yet.
+    ASSERT_EQUALS(MODE_NONE, txnLocker1.getLockMode(globalResId));
+    ASSERT_EQUALS(MODE_NONE, txnLocker2.getLockMode(globalResId));
+    ASSERT_EQUALS(MODE_NONE, txnLocker3.getLockMode(globalResId));
+
+    // Make sure things were re-locked.
+    //    ASSERT_EQUALS(MODE_NONE, stepUpLocker.getLockMode(globalResId));
+    //
+    //    ASSERT_EQUALS(MODE_IX, txnLocker1.getLockMode(globalResId));
+    //    ASSERT_EQUALS(MODE_IX, txnLocker1.getLockMode(resIdDatabase));
+    //    ASSERT_EQUALS(MODE_IX, txnLocker1.getLockMode(resIdCollection1));
+    //    ASSERT_EQUALS(MODE_IX, txnLocker1.getLockMode(resIdCollection2));
+    //
+    //    ASSERT_EQUALS(MODE_IX, txnLocker2.getLockMode(globalResId));
+    //    ASSERT_EQUALS(MODE_IX, txnLocker2.getLockMode(resIdDatabase));
+    //    ASSERT_EQUALS(MODE_IX, txnLocker2.getLockMode(resIdCollection2));
+    //
+    //    ASSERT_EQUALS(MODE_IX, txnLocker3.getLockMode(globalResId));
+    //    ASSERT_EQUALS(MODE_IX, txnLocker3.getLockMode(resIdDatabase));
+    //    ASSERT_EQUALS(MODE_IX, txnLocker3.getLockMode(resIdCollection3));
+}
 }  // namespace mongo

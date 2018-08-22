@@ -176,6 +176,12 @@ public:
         MONGO_UNREACHABLE;
     }
 
+    void restoreLockStateWithTemporaryGlobalLockHead(OperationContext* opCtx,
+                                                     const LockSnapshot& stateToRestore,
+                                                     LockHead* tempGlobalLockHead) override {
+        MONGO_UNREACHABLE;
+    }
+
     virtual void releaseTicket() {
         MONGO_UNREACHABLE;
     }

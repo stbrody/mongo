@@ -88,6 +88,11 @@ public:
     LockResult convert(ResourceId resId, LockRequest* request, LockMode newMode);
 
     /**
+     * TODO
+     */
+    LockResult lockGivenLockHead(LockHead*, LockRequest* request, LockMode mode);
+
+    /**
      * Decrements the reference count of a previously locked request and if the reference count
      * becomes zero, removes the request and proceeds to granting any conflicts.
      *

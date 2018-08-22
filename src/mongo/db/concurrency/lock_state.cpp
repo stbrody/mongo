@@ -120,6 +120,10 @@ AtomicUInt64 idCounter(0);
 // Partitioned global lock statistics, so we don't hit the same bucket
 PartitionedInstanceWideLockStats globalStats;
 
+// TODO
+OperationContext::Decoration<LockHead*> temporaryGlobalLockHead =
+    OperationContext::declareDecoration<LockHead*>();
+
 }  // namespace
 
 bool LockerImpl::_shouldDelayUnlock(ResourceId resId, LockMode mode) const {
@@ -645,6 +649,16 @@ void LockerImpl::restoreLockState(OperationContext* opCtx, const Locker::LockSna
     invariant(_modeForTicket != MODE_NONE);
 }
 
+void LockerImpl::restoreLockStateWithTemporaryGlobalLockHead(OperationContext* opCtx,
+                                                             const LockSnapshot& state,
+                                                             LockHead* tempGlobalLockHead) {
+    invariant(temporaryGlobalLockHead(opCtx) == nullptr);
+    temporaryGlobalLockHead(opCtx) = tempGlobalLockHead;
+    ON_BLOCK_EXIT([&] { temporaryGlobalLockHead(opCtx) = nullptr; });
+
+    restoreLockState(opCtx, state);
+}
+
 LockResult LockerImpl::lockBegin(OperationContext* opCtx, ResourceId resId, LockMode mode) {
     dassert(!getWaitingResource().isValid());
 
@@ -700,8 +714,18 @@ LockResult LockerImpl::lockBegin(OperationContext* opCtx, ResourceId resId, Lock
     // otherwise we might reset state if the lock becomes granted very fast.
     _notify.clear();
 
-    LockResult result = isNew ? globalLockManager.lock(resId, request, mode)
-                              : globalLockManager.convert(resId, request, mode);
+    LockResult result;
+    if (resType == RESOURCE_GLOBAL && opCtx && temporaryGlobalLockHead(opCtx)) {
+        // If we're trying to lock the global resource and we have a temporary global lock head
+        // installed, use the temporary lock head instead of letting the LockManager look up the
+        // true LockHead for the global lock.
+        invariant(isNew);
+        globalLockManager.lockGivenLockHead(temporaryGlobalLockHead(opCtx), request, mode);
+    } else {
+        // Normal case
+        result = isNew ? globalLockManager.lock(resId, request, mode)
+                       : globalLockManager.convert(resId, request, mode);
+    }
 
     if (result == LOCK_WAITING) {
         globalStats.recordWait(_id, resId, mode);
