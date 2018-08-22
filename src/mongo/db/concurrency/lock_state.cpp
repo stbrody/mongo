@@ -659,6 +659,19 @@ void LockerImpl::restoreLockStateWithTemporaryGlobalLockHead(OperationContext* o
     restoreLockState(opCtx, state);
 }
 
+void LockerImpl::replaceGlobalLockStateWithTemporaryGlobalLockHead(LockHead* tempGlobalLockHead) {
+    // Transfer the LockRequests from tempGlobalLockHead into the true LockHead for the global lock
+    // that is managed by the LockManager.  This also removes the existing MODE_X LockRequest from
+    // the granted list for the true global LockHead, but we still need to delete that LockRequest
+    // and remove it from this Locker's _requests list.
+    globalLockManager.transferLocksFromLockHead(resourceIdGlobal, tempGlobalLockHead);
+
+    // Now fully delete the LockRequest.
+    auto it = _requests.find(resourceIdGlobal);
+    scoped_spinlock scopedLock(_lock);
+    it.remove();
+}
+
 LockResult LockerImpl::lockBegin(OperationContext* opCtx, ResourceId resId, LockMode mode) {
     dassert(!getWaitingResource().isValid());
 

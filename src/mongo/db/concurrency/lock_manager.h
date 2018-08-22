@@ -88,9 +88,14 @@ public:
     LockResult convert(ResourceId resId, LockRequest* request, LockMode newMode);
 
     /**
-     * TODO
+     * TODO comment and rename method
      */
-    LockResult lockGivenLockHead(LockHead*, LockRequest* request, LockMode mode);
+    LockResult lockGivenLockHead(LockHead* tempLockHead, LockRequest* request, LockMode mode);
+
+    /**
+     * TODO comment and rename method
+     */
+    void transferLocksFromLockHead(ResourceId resId, LockHead* tempLockHead);
 
     /**
      * Decrements the reference count of a previously locked request and if the reference count

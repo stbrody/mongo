@@ -350,6 +350,42 @@ LockResult LockManager::lockGivenLockHead(LockHead* lockHead, LockRequest* reque
     return lockHead->newRequest(request);
 }
 
+void LockManager::transferLocksFromLockHead(ResourceId resId, LockHead* tempGlobalLockHead) {
+    invariant(resId.getType() == ResourceType::RESOURCE_GLOBAL);
+    invariant(tempGlobalLockHead->resourceId == resId);
+
+    LockBucket* bucket = _getBucket(resId);
+    stdx::lock_guard<SimpleMutex> scopedLock(bucket->mutex);
+    LockHead* trueGlobalLockHead = bucket->findOrInsert(resId);
+
+    invariant(trueGlobalLockHead->grantedCounts[MODE_X] == 1);
+    invariant(tempGlobalLockHead->conflictList.empty());
+
+    LockRequest* existingGlobalLockRequest = trueGlobalLockHead->grantedList._front;
+    invariant(!existingGlobalLockRequest->next);
+    invariant(existingGlobalLockRequest->mode == MODE_X);
+    invariant(existingGlobalLockRequest->status == LockRequest::Status::STATUS_GRANTED);
+
+    // Remove the existing granted MODE_X lock from the trueGlobalLockHead so it can be replaced
+    // by the locks from tempGlobalLockHead.
+    trueGlobalLockHead->grantedList.remove(existingGlobalLockRequest);
+
+    // Now iterate over the granted LockRequests in the tempGlobalLockHead and transfer them over
+    // to the trueGlobalLockHead.
+    for (LockRequest* it = tempGlobalLockHead->grantedList._front; it != nullptr;) {
+        LockRequest* next = it->next;
+
+        invariant(it->mode == MODE_IX);
+        invariant(it->status == LockRequest::Status::STATUS_GRANTED);
+
+        tempGlobalLockHead->grantedList.remove(it);
+        trueGlobalLockHead->grantedList.push_back(it);
+
+        it = next;
+    }
+    invariant(tempGlobalLockHead->grantedList.empty());
+}
+
 LockResult LockManager::lock(ResourceId resId, LockRequest* request, LockMode mode) {
     // Sanity check that requests are not being reused without proper cleanup
     invariant(request->status == LockRequest::STATUS_NEW);

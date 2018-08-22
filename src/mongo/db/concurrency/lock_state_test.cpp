@@ -716,20 +716,22 @@ TEST(LockerImpl, TempName) {  // todo test name
     invariant(tempLockHead.grantedCounts[MODE_IX] == 3);
     invariant(tempLockHead.grantedCounts[MODE_X] == 0);
 
+    stepUpLocker.replaceGlobalLockStateWithTemporaryGlobalLockHead(&tempLockHead);
+
     // Make sure things were re-locked.
-    //    ASSERT_EQUALS(MODE_NONE, stepUpLocker.getLockMode(globalResId));
-    //
-    //    ASSERT_EQUALS(MODE_IX, txnLocker1.getLockMode(globalResId));
-    //    ASSERT_EQUALS(MODE_IX, txnLocker1.getLockMode(resIdDatabase));
-    //    ASSERT_EQUALS(MODE_IX, txnLocker1.getLockMode(resIdCollection1));
-    //    ASSERT_EQUALS(MODE_IX, txnLocker1.getLockMode(resIdCollection2));
-    //
-    //    ASSERT_EQUALS(MODE_IX, txnLocker2.getLockMode(globalResId));
-    //    ASSERT_EQUALS(MODE_IX, txnLocker2.getLockMode(resIdDatabase));
-    //    ASSERT_EQUALS(MODE_IX, txnLocker2.getLockMode(resIdCollection2));
-    //
-    //    ASSERT_EQUALS(MODE_IX, txnLocker3.getLockMode(globalResId));
-    //    ASSERT_EQUALS(MODE_IX, txnLocker3.getLockMode(resIdDatabase));
-    //    ASSERT_EQUALS(MODE_IX, txnLocker3.getLockMode(resIdCollection3));
+    ASSERT_EQUALS(MODE_NONE, stepUpLocker.getLockMode(globalResId));
+
+    ASSERT_EQUALS(MODE_IX, txnLocker1.getLockMode(globalResId));
+    ASSERT_EQUALS(MODE_IX, txnLocker1.getLockMode(resIdDatabase));
+    ASSERT_EQUALS(MODE_IX, txnLocker1.getLockMode(resIdCollection1));
+    ASSERT_EQUALS(MODE_IX, txnLocker1.getLockMode(resIdCollection2));
+
+    ASSERT_EQUALS(MODE_IX, txnLocker2.getLockMode(globalResId));
+    ASSERT_EQUALS(MODE_IX, txnLocker2.getLockMode(resIdDatabase));
+    ASSERT_EQUALS(MODE_IX, txnLocker2.getLockMode(resIdCollection2));
+
+    ASSERT_EQUALS(MODE_IX, txnLocker3.getLockMode(globalResId));
+    ASSERT_EQUALS(MODE_IX, txnLocker3.getLockMode(resIdDatabase));
+    ASSERT_EQUALS(MODE_IX, txnLocker3.getLockMode(resIdCollection3));
 }
 }  // namespace mongo

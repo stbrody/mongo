@@ -182,6 +182,10 @@ public:
         MONGO_UNREACHABLE;
     }
 
+    void replaceGlobalLockStateWithTemporaryGlobalLockHead(LockHead* tempGlobalLockHead) override {
+        MONGO_UNREACHABLE;
+    }
+
     virtual void releaseTicket() {
         MONGO_UNREACHABLE;
     }

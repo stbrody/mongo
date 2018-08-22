@@ -365,6 +365,12 @@ public:
                                                              LockHead* tempGlobalLockHead) = 0;
 
     /**
+     * TODO
+     */
+    virtual void replaceGlobalLockStateWithTemporaryGlobalLockHead(
+        LockHead* tempGlobalLockHead) = 0;
+
+    /**
      * Releases the ticket associated with the Locker. This allows locks to be held without
      * contributing to reader/writer throttling.
      */
