@@ -351,7 +351,7 @@ LockResult LockerImpl::_lockGlobalBegin(OperationContext* opCtx, LockMode mode, 
     }
 
     LockMode actualLockMode = mode;
-    if (opCtx) {
+    if (opCtx && opCtx->getServiceContext()) {
         auto storageEngine = opCtx->getServiceContext()->getStorageEngine();
         if (storageEngine && !storageEngine->supportsDBLocking()) {
             actualLockMode = isSharedLockMode(mode) ? MODE_S : MODE_X;
@@ -363,7 +363,7 @@ LockResult LockerImpl::_lockGlobalBegin(OperationContext* opCtx, LockMode mode, 
 
     // Currently, deadlock detection does not happen inline with lock acquisition so the only
     // unsuccessful result that the lock manager would return is LOCK_WAITING.
-    invariant(result == LOCK_WAITING);
+    invariant(result == LOCK_WAITING, str::stream() << "Unexpected lock result: " << result);
 
     return result;
 }
@@ -714,13 +714,13 @@ LockResult LockerImpl::lockBegin(OperationContext* opCtx, ResourceId resId, Lock
     // otherwise we might reset state if the lock becomes granted very fast.
     _notify.clear();
 
-    LockResult result;
+    LockResult result{LockResult::LOCK_INVALID};
     if (resType == RESOURCE_GLOBAL && opCtx && temporaryGlobalLockHead(opCtx)) {
         // If we're trying to lock the global resource and we have a temporary global lock head
         // installed, use the temporary lock head instead of letting the LockManager look up the
         // true LockHead for the global lock.
         invariant(isNew);
-        globalLockManager.lockGivenLockHead(temporaryGlobalLockHead(opCtx), request, mode);
+        result = globalLockManager.lockGivenLockHead(temporaryGlobalLockHead(opCtx), request, mode);
     } else {
         // Normal case
         result = isNew ? globalLockManager.lock(resId, request, mode)

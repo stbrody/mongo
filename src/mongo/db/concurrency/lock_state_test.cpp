@@ -716,11 +716,6 @@ TEST(LockerImpl, TempName) {  // todo test name
     invariant(tempLockHead.grantedCounts[MODE_IX] == 3);
     invariant(tempLockHead.grantedCounts[MODE_X] == 0);
 
-    // Check that the global lock state wasn't restored into the true lock manager state yet.
-    ASSERT_EQUALS(MODE_NONE, txnLocker1.getLockMode(globalResId));
-    ASSERT_EQUALS(MODE_NONE, txnLocker2.getLockMode(globalResId));
-    ASSERT_EQUALS(MODE_NONE, txnLocker3.getLockMode(globalResId));
-
     // Make sure things were re-locked.
     //    ASSERT_EQUALS(MODE_NONE, stepUpLocker.getLockMode(globalResId));
     //
