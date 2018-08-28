@@ -666,7 +666,14 @@ TEST(LockerImpl, TempName) {  // todo test name
     const ResourceId resIdCollection3(RESOURCE_COLLECTION, "TestDB.collection2"_sd);
 
     Locker::LockSnapshot lockInfo1, lockInfo2, lockInfo3;
-    LockerImpl stepUpLocker, txnLocker1, txnLocker2, txnLocker3;
+    // TODO // LockerImpl stepUpLocker, txnLocker1, txnLocker2, txnLocker3, randomOpLocker1,
+    // randomOpLocker2;
+    LockerImpl stepUpLocker;
+    LockerImpl txnLocker1;
+    LockerImpl txnLocker2;
+    LockerImpl txnLocker3;
+    LockerImpl randomOpLocker1;
+    LockerImpl randomOpLocker2;
     OperationContextNoop opCtx1, opCtx2, opCtx3;
     ON_BLOCK_EXIT([&] {
         // clean up locks on test completion.
@@ -674,6 +681,8 @@ TEST(LockerImpl, TempName) {  // todo test name
         txnLocker1.unlockGlobal();
         txnLocker2.unlockGlobal();
         txnLocker3.unlockGlobal();
+        randomOpLocker1.unlockGlobal();
+        randomOpLocker2.unlockGlobal();
     });
 
     // Take some locks
@@ -693,6 +702,11 @@ TEST(LockerImpl, TempName) {  // todo test name
     // Enqueue request for global X lock in stepUpLocker.
     ASSERT_EQUALS(LockResult::LOCK_WAITING, stepUpLocker.lockGlobalBegin(MODE_X, Date_t::max()));
 
+    // Enqueue a lock request behind the pending global X request to ensure that it gets granted
+    // later when the global X lock is released.
+    ASSERT_EQUALS(LockResult::LOCK_WAITING,
+                  randomOpLocker1.lockGlobalBegin(MODE_IS, Date_t::max()));
+
     // Yield locks on all txn threads.
     txnLocker1.saveLockStateAndUnlock(&lockInfo1);
     txnLocker2.saveLockStateAndUnlock(&lockInfo2);
@@ -700,6 +714,11 @@ TEST(LockerImpl, TempName) {  // todo test name
 
     // Ensure that stepUpLocker is now able to acquire the global X lock.
     ASSERT_EQUALS(LockResult::LOCK_OK, stepUpLocker.lockGlobalComplete(Date_t::max()));
+
+    // Enqueue a lock request behind the global X lock to ensure that it gets granted
+    // later when the global X lock is released.
+    ASSERT_EQUALS(LockResult::LOCK_WAITING,
+                  randomOpLocker2.lockGlobalBegin(MODE_IS, Date_t::max()));
 
     // Atomically release the global X lock from stepUpLocker and restore the lock state for the txn
     // threads. TODO update comment
@@ -733,5 +752,15 @@ TEST(LockerImpl, TempName) {  // todo test name
     ASSERT_EQUALS(MODE_IX, txnLocker3.getLockMode(globalResId));
     ASSERT_EQUALS(MODE_IX, txnLocker3.getLockMode(resIdDatabase));
     ASSERT_EQUALS(MODE_IX, txnLocker3.getLockMode(resIdCollection3));
+
+    // Make sure the pending global lock requests got granted when the global X lock was released.
+    ASSERT_EQUALS(LockResult::LOCK_OK, randomOpLocker1.lockGlobalComplete(Date_t::now()));
+    ASSERT_EQUALS(LockResult::LOCK_OK, randomOpLocker2.lockGlobalComplete(Date_t::now()));
+
+
+    std::cout << "AAAA!!!!! TEST "
+                 "PASSED!!!!@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@"
+                 "@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@"
+              << std::endl;
 }
 }  // namespace mongo

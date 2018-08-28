@@ -369,6 +369,7 @@ void LockManager::transferLocksFromLockHead(ResourceId resId, LockHead* tempGlob
     // Remove the existing granted MODE_X lock from the trueGlobalLockHead so it can be replaced
     // by the locks from tempGlobalLockHead.
     trueGlobalLockHead->grantedList.remove(existingGlobalLockRequest);
+    trueGlobalLockHead->decGrantedModeCount(existingGlobalLockRequest->mode);
 
     // Now iterate over the granted LockRequests in the tempGlobalLockHead and transfer them over
     // to the trueGlobalLockHead.
@@ -377,13 +378,22 @@ void LockManager::transferLocksFromLockHead(ResourceId resId, LockHead* tempGlob
 
         invariant(it->mode == MODE_IX);
         invariant(it->status == LockRequest::Status::STATUS_GRANTED);
+        invariant(it->lock == tempGlobalLockHead);
 
+        it->lock = trueGlobalLockHead;
         tempGlobalLockHead->grantedList.remove(it);
+        tempGlobalLockHead->decGrantedModeCount(it->mode);
         trueGlobalLockHead->grantedList.push_back(it);
+        trueGlobalLockHead->incGrantedModeCount(it->mode);
+
 
         it = next;
     }
     invariant(tempGlobalLockHead->grantedList.empty());
+
+    // Grant any pending requests against the true global lock head that can proceed now that the
+    // global X lock has been released.
+    _onLockModeChanged(trueGlobalLockHead, true);
 }
 
 LockResult LockManager::lock(ResourceId resId, LockRequest* request, LockMode mode) {
