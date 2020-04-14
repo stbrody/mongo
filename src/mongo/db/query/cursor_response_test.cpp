@@ -229,7 +229,7 @@ TEST(CursorResponseTest, roundTripThroughCursorResponseBuilderWithPartialResults
     crb.done(CursorId(123), "db.coll");
 
     // Confirm that the resulting BSONObj response matches the expected body.
-    auto msg = builder.done();
+    auto msg = uassertStatusOK(builder.done());
     auto opMsg = OpMsg::parse(msg);
     ASSERT_BSONOBJ_EQ(expectedBody, opMsg.body);
 
@@ -381,7 +381,7 @@ TEST(CursorResponseTest, cursorReturnDocumentSequences) {
     ASSERT_EQ(crb.numDocs(), 1U);
     crb.done(CursorId(123), "db.coll");
 
-    auto msg = builder.done();
+    auto msg = uassertStatusOK(builder.done());
     auto opMsg = OpMsg::parse(msg);
     const auto& docSeqs = opMsg.sequences;
     ASSERT_EQ(docSeqs.size(), 1U);

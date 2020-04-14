@@ -72,7 +72,7 @@ public:
     void reset() override {
         _builder.reset();
     }
-    Message done() override {
+    StatusWith<Message> done() override {
         return _builder.finish();
     }
     void reserveBytes(const std::size_t bytes) override {

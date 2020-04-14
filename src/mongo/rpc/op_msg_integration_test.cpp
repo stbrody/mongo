@@ -81,7 +81,8 @@ TEST(OpMsg, UnknownRequiredFlagClosesConnection) {
         unittest::getFixtureConnectionString().connect("integration_test", errMsg));
     uassert(ErrorCodes::SocketException, errMsg, conn);
 
-    auto request = OpMsgRequest::fromDBAndBody("admin", BSON("ping" << 1)).serialize();
+    auto request =
+        uassertStatusOK(OpMsgRequest::fromDBAndBody("admin", BSON("ping" << 1)).serialize());
     OpMsg::setFlag(&request, 1u << 15);  // This should be the last required flag to be assigned.
 
     Message reply;
@@ -94,7 +95,8 @@ TEST(OpMsg, UnknownOptionalFlagIsIgnored) {
         unittest::getFixtureConnectionString().connect("integration_test", errMsg));
     uassert(ErrorCodes::SocketException, errMsg, conn);
 
-    auto request = OpMsgRequest::fromDBAndBody("admin", BSON("ping" << 1)).serialize();
+    auto request =
+        uassertStatusOK(OpMsgRequest::fromDBAndBody("admin", BSON("ping" << 1)).serialize());
     OpMsg::setFlag(&request, 1u << 31);  // This should be the last optional flag to be assigned.
 
     Message reply;
@@ -148,7 +150,7 @@ TEST(OpMsg, DocumentSequenceLargeDocumentMultiInsertWorks) {
         $db: "test"
     })"));
 
-    Message request = msgBuilder.finish();
+    Message request = msgBuilder.finishWithoutSizeChecking();
     Message reply;
     ASSERT_TRUE(conn->call(request, reply, false));
 
@@ -184,7 +186,7 @@ TEST(OpMsg, DocumentSequenceMaxWriteBatchWorks) {
 
     msgBuilder.setBody(std::move(body));
 
-    Message request = msgBuilder.finish();
+    Message request = msgBuilder.finishWithoutSizeChecking();
     Message reply;
     ASSERT_TRUE(conn->call(request, reply, false));
 
@@ -210,14 +212,14 @@ TEST(OpMsg, CloseConnectionOnFireAndForgetNotMasterError) {
             continue;
         foundSecondary = true;
 
-        auto request = OpMsgRequest::fromDBAndBody("test", fromjson(R"({
+        auto request = uassertStatusOK(OpMsgRequest::fromDBAndBody("test", fromjson(R"({
             insert: "collection",
             writeConcern: {w: 0},
             documents: [
                 {a: 1}
             ]
         })"))
-                           .serialize();
+                                           .serialize());
 
         // Round-trip command fails with NotMaster error. Note that this failure is in command
         // dispatch which ignores w:0.
@@ -287,7 +289,7 @@ TEST(OpMsg, DocumentSequenceReturnsWork) {
 
     auto opMsgRequest = OpMsgRequest::fromDBAndBody("admin", BSON("echo" << 1));
     opMsgRequest.sequences.push_back({"example", {BSON("a" << 1), BSON("b" << 2)}});
-    auto request = opMsgRequest.serialize();
+    auto request = uassertStatusOK(opMsgRequest.serialize());
 
     Message reply;
     ASSERT(conn->call(request, reply));
@@ -353,7 +355,7 @@ void exhaustGetMoreTest(bool enableChecksum) {
     // guarantee their return order.
     auto findCmd = BSON("find" << nss.coll() << "batchSize" << 0 << "sort" << BSON("_id" << 1));
     auto opMsgRequest = OpMsgRequest::fromDBAndBody(nss.db(), findCmd);
-    auto request = opMsgRequest.serialize();
+    auto request = uassertStatusOK(opMsgRequest.serialize());
 
     Message reply;
     ASSERT(conn->call(request, reply));
@@ -369,7 +371,7 @@ void exhaustGetMoreTest(bool enableChecksum) {
     int batchSize = 2;
     GetMoreRequest gmr(nss, cursorId, batchSize, boost::none, boost::none, boost::none);
     opMsgRequest = OpMsgRequest::fromDBAndBody(nss.db(), gmr.toBSON());
-    request = opMsgRequest.serialize();
+    request = uassertStatusOK(opMsgRequest.serialize());
     OpMsg::setFlag(&request, OpMsg::kExhaustSupported);
 
     // Run getMore to initiate the exhaust stream.
@@ -441,7 +443,7 @@ TEST(OpMsg, FindIgnoresExhaust) {
     // Issue a find request with exhaust flag. Returns 0 documents.
     auto findCmd = BSON("find" << nss.coll() << "batchSize" << 0);
     auto opMsgRequest = OpMsgRequest::fromDBAndBody(nss.db(), findCmd);
-    auto request = opMsgRequest.serialize();
+    auto request = uassertStatusOK(opMsgRequest.serialize());
     OpMsg::setFlag(&request, OpMsg::kExhaustSupported);
 
     Message reply;
@@ -476,7 +478,7 @@ TEST(OpMsg, ServerDoesNotSetMoreToComeOnErrorInGetMore) {
     // Issue a find request to open a cursor but return 0 documents.
     auto findCmd = BSON("find" << nss.coll() << "batchSize" << 0);
     auto opMsgRequest = OpMsgRequest::fromDBAndBody(nss.db(), findCmd);
-    auto request = opMsgRequest.serialize();
+    auto request = uassertStatusOK(opMsgRequest.serialize());
 
     Message reply;
     ASSERT(conn->call(request, reply));
@@ -492,7 +494,7 @@ TEST(OpMsg, ServerDoesNotSetMoreToComeOnErrorInGetMore) {
     int batchSize = 2;
     GetMoreRequest gmr(nss, cursorId, batchSize, boost::none, boost::none, boost::none);
     opMsgRequest = OpMsgRequest::fromDBAndBody(nss.db(), gmr.toBSON());
-    request = opMsgRequest.serialize();
+    request = uassertStatusOK(opMsgRequest.serialize());
     OpMsg::setFlag(&request, OpMsg::kExhaustSupported);
 
     // Run getMore. This should not start an exhaust stream.
@@ -526,7 +528,7 @@ TEST(OpMsg, MongosIgnoresExhaustForGetMore) {
     // guarantee their return order.
     auto findCmd = BSON("find" << nss.coll() << "batchSize" << 0 << "sort" << BSON("_id" << 1));
     auto opMsgRequest = OpMsgRequest::fromDBAndBody(nss.db(), findCmd);
-    auto request = opMsgRequest.serialize();
+    auto request = uassertStatusOK(opMsgRequest.serialize());
 
     Message reply;
     ASSERT(conn->call(request, reply));
@@ -539,7 +541,7 @@ TEST(OpMsg, MongosIgnoresExhaustForGetMore) {
     int batchSize = 2;
     GetMoreRequest gmr(nss, cursorId, batchSize, boost::none, boost::none, boost::none);
     opMsgRequest = OpMsgRequest::fromDBAndBody(nss.db(), gmr.toBSON());
-    request = opMsgRequest.serialize();
+    request = uassertStatusOK(opMsgRequest.serialize());
     OpMsg::setFlag(&request, OpMsg::kExhaustSupported);
 
     // Run getMore. This should not start an exhaust stream.
@@ -573,7 +575,7 @@ TEST(OpMsg, ServerHandlesExhaustIsMasterCorrectly) {
     // Issue an isMaster command without a topology version.
     auto isMasterCmd = BSON("isMaster" << 1);
     auto opMsgRequest = OpMsgRequest::fromDBAndBody("admin", isMasterCmd);
-    auto request = opMsgRequest.serialize();
+    auto request = uassertStatusOK(opMsgRequest.serialize());
 
     Message reply;
     ASSERT(conn->call(request, reply));
@@ -586,7 +588,7 @@ TEST(OpMsg, ServerHandlesExhaustIsMasterCorrectly) {
     isMasterCmd =
         BSON("isMaster" << 1 << "topologyVersion" << topologyVersion << "maxAwaitTimeMS" << 100);
     opMsgRequest = OpMsgRequest::fromDBAndBody("admin", isMasterCmd);
-    request = opMsgRequest.serialize();
+    request = uassertStatusOK(opMsgRequest.serialize());
     OpMsg::setFlag(&request, OpMsg::kExhaustSupported);
 
     // Run isMaster command to initiate the exhaust stream.
@@ -636,7 +638,7 @@ TEST(OpMsg, ServerHandlesExhaustIsMasterWithTopologyChange) {
     // Issue an isMaster command without a topology version.
     auto isMasterCmd = BSON("isMaster" << 1);
     auto opMsgRequest = OpMsgRequest::fromDBAndBody("admin", isMasterCmd);
-    auto request = opMsgRequest.serialize();
+    auto request = uassertStatusOK(opMsgRequest.serialize());
 
     Message reply;
     ASSERT(conn->call(request, reply));
@@ -651,7 +653,7 @@ TEST(OpMsg, ServerHandlesExhaustIsMasterWithTopologyChange) {
                                   << BSON("processId" << OID::gen() << "counter" << 0LL)
                                   << "maxAwaitTimeMS" << 100);
     opMsgRequest = OpMsgRequest::fromDBAndBody("admin", isMasterCmd);
-    request = opMsgRequest.serialize();
+    request = uassertStatusOK(opMsgRequest.serialize());
     OpMsg::setFlag(&request, OpMsg::kExhaustSupported);
 
     // Run isMaster command to initiate the exhaust stream. The first response should be received
@@ -700,7 +702,7 @@ TEST(OpMsg, ServerRejectsExhaustIsMasterWithoutMaxAwaitTimeMS) {
     // Issue an isMaster command with exhaust but no maxAwaitTimeMS.
     auto isMasterCmd = BSON("isMaster" << 1);
     auto opMsgRequest = OpMsgRequest::fromDBAndBody("admin", isMasterCmd);
-    auto request = opMsgRequest.serialize();
+    auto request = uassertStatusOK(opMsgRequest.serialize());
     OpMsg::setFlag(&request, OpMsg::kExhaustSupported);
 
     Message reply;
@@ -733,7 +735,7 @@ TEST(OpMsg, ServerStatusCorrectlyShowsExhaustIsMasterMetrics) {
     // Issue an isMaster command without a topology version.
     auto isMasterCmd = BSON("isMaster" << 1);
     auto opMsgRequest = OpMsgRequest::fromDBAndBody("admin", isMasterCmd);
-    auto request = opMsgRequest.serialize();
+    auto request = uassertStatusOK(opMsgRequest.serialize());
 
     Message reply;
     ASSERT(conn->call(request, reply));
@@ -745,7 +747,7 @@ TEST(OpMsg, ServerStatusCorrectlyShowsExhaustIsMasterMetrics) {
     isMasterCmd =
         BSON("isMaster" << 1 << "topologyVersion" << topologyVersion << "maxAwaitTimeMS" << 100);
     opMsgRequest = OpMsgRequest::fromDBAndBody("admin", isMasterCmd);
-    request = opMsgRequest.serialize();
+    request = uassertStatusOK(opMsgRequest.serialize());
     OpMsg::setFlag(&request, OpMsg::kExhaustSupported);
 
     // Run isMaster command to initiate the exhaust stream.
@@ -793,7 +795,7 @@ TEST(OpMsg, ExhaustIsMasterMetricDecrementsOnNewOpAfterTerminatingExhaustStream)
     // Issue an isMaster command without a topology version.
     auto isMasterCmd = BSON("isMaster" << 1);
     auto opMsgRequest = OpMsgRequest::fromDBAndBody("admin", isMasterCmd);
-    auto request = opMsgRequest.serialize();
+    auto request = uassertStatusOK(opMsgRequest.serialize());
 
     Message reply;
     ASSERT(conn1->call(request, reply));
@@ -805,7 +807,7 @@ TEST(OpMsg, ExhaustIsMasterMetricDecrementsOnNewOpAfterTerminatingExhaustStream)
     isMasterCmd =
         BSON("isMaster" << 1 << "topologyVersion" << topologyVersion << "maxAwaitTimeMS" << 100);
     opMsgRequest = OpMsgRequest::fromDBAndBody("admin", isMasterCmd);
-    request = opMsgRequest.serialize();
+    request = uassertStatusOK(opMsgRequest.serialize());
     OpMsg::setFlag(&request, OpMsg::kExhaustSupported);
 
     // Run isMaster command to initiate the exhaust stream.
@@ -884,7 +886,7 @@ TEST(OpMsg, ExhaustIsMasterMetricOnNewExhaustIsMasterAfterTerminatingExhaustStre
     // Issue an isMaster command without a topology version.
     auto isMasterCmd = BSON("isMaster" << 1);
     auto opMsgRequest = OpMsgRequest::fromDBAndBody("admin", isMasterCmd);
-    auto request = opMsgRequest.serialize();
+    auto request = uassertStatusOK(opMsgRequest.serialize());
 
     Message reply;
     ASSERT(conn1->call(request, reply));
@@ -896,7 +898,7 @@ TEST(OpMsg, ExhaustIsMasterMetricOnNewExhaustIsMasterAfterTerminatingExhaustStre
     isMasterCmd =
         BSON("isMaster" << 1 << "topologyVersion" << topologyVersion << "maxAwaitTimeMS" << 100);
     opMsgRequest = OpMsgRequest::fromDBAndBody("admin", isMasterCmd);
-    request = opMsgRequest.serialize();
+    request = uassertStatusOK(opMsgRequest.serialize());
     OpMsg::setFlag(&request, OpMsg::kExhaustSupported);
 
     // Run isMaster command to initiate the exhaust stream.
@@ -945,7 +947,7 @@ TEST(OpMsg, ExhaustIsMasterMetricOnNewExhaustIsMasterAfterTerminatingExhaustStre
     ASSERT_EQUALS(1, serverStatusReply["connections"]["exhaustIsMaster"].numberInt());
 
     opMsgRequest = OpMsgRequest::fromDBAndBody("admin", isMasterCmd);
-    request = opMsgRequest.serialize();
+    request = uassertStatusOK(opMsgRequest.serialize());
     OpMsg::setFlag(&request, OpMsg::kExhaustSupported);
 
     // Run isMaster command on conn1 to initiate a new exhaust stream.
@@ -1029,7 +1031,7 @@ void checksumTest(bool enableChecksum) {
     ON_BLOCK_EXIT([&] { enableClientChecksum(); });
 
     auto opMsgRequest = OpMsgRequest::fromDBAndBody("admin", BSON("ping" << 1));
-    auto request = opMsgRequest.serialize();
+    auto request = uassertStatusOK(opMsgRequest.serialize());
 
     Message reply;
     ASSERT(conn->call(request, reply));
@@ -1064,7 +1066,7 @@ TEST(OpMsg, ServerHandlesReallyLargeMessagesGracefully) {
     OpMsgRequest request;
     request.body = bob.obj<BSONObj::LargeSizeTrait>();
     ASSERT_GT(request.body.objsize(), BSONObjMaxInternalSize);
-    auto requestMsg = request.serialize();
+    auto requestMsg = request.serializeWithoutSizeChecking();
 
     Message replyMsg;
     ASSERT(conn->call(requestMsg, replyMsg));

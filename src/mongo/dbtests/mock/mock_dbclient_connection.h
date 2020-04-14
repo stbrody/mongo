@@ -54,7 +54,7 @@ public:
         auto cursorRes = CursorResponse(nss, cursorId, firstBatch);
         BSONObjBuilder bob(cursorRes.toBSON(CursorResponse::ResponseType::InitialResponse));
         bob.appendElementsUnique(metadata);
-        return OpMsg{bob.obj()}.serialize();
+        return uassertStatusOK(OpMsg{bob.obj()}.serialize());
     }
 
     /**
@@ -68,7 +68,7 @@ public:
         auto cursorRes = CursorResponse(nss, cursorId, batch);
         BSONObjBuilder bob(cursorRes.toBSON(CursorResponse::ResponseType::SubsequentResponse));
         bob.appendElementsUnique(metadata);
-        auto m = OpMsg{bob.obj()}.serialize();
+        auto m = uassertStatusOK(OpMsg{bob.obj()}.serialize());
         if (moreToCome) {
             OpMsg::setFlag(&m, OpMsg::kMoreToCome);
         }
@@ -84,7 +84,7 @@ public:
         bodyBob.append("ok", 0);
         bodyBob.append("code", err);
         builder.setBody(bodyBob.done());
-        return builder.finish();
+        return invariantStatusOK(builder.finish());
     }
 
     /**

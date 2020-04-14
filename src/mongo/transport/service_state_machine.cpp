@@ -109,7 +109,7 @@ Message makeLegacyExhaustMessage(Message* m, const DbResponse& dbresponse) {
  * it is part of an exhaust stream. Returns the subsequent request message, which is known as a
  * 'synthetic' exhaust request. Returns an empty message if exhaust is not allowed.
  */
-Message makeExhaustMessage(Message requestMsg, DbResponse* dbresponse) {
+StatusWith<Message> makeExhaustMessage(Message requestMsg, DbResponse* dbresponse) {
     if (requestMsg.operation() == dbQuery) {
         return makeLegacyExhaustMessage(&requestMsg, *dbresponse);
     }
@@ -129,7 +129,11 @@ Message makeExhaustMessage(Message requestMsg, DbResponse* dbresponse) {
         // The command provided a new BSONObj for the next invocation.
         OpMsgBuilder builder;
         builder.setBody(*nextInvocation);
-        exhaustMessage = builder.finish();
+        auto msg = builder.finish();
+        if (!msg.isOK()) {
+            return msg;
+        }
+        exhaustMessage = std::move(msg).getValue();
     } else {
         // Reuse the previous invocation for the next invocation.
         OpMsg::removeChecksum(&requestMsg);
@@ -497,7 +501,7 @@ void ServiceStateMachine::_processMessage(ThreadGuard guard) {
         // sourced a new message from the network. This new request is sent to the database once
         // again to be processed. This cycle repeats as long as the command indicates the exhaust
         // stream should continue.
-        _inMessage = makeExhaustMessage(_inMessage, &dbresponse);
+        _inMessage = uassertStatusOK(makeExhaustMessage(_inMessage, &dbresponse));
         _inExhaust = !_inMessage.empty();
 
         networkCounter.hitLogicalOut(toSink.size());

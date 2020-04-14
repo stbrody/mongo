@@ -169,7 +169,7 @@ rpc::UniqueReply MockRemoteDBServer::runCommand(InstanceID id, const OpMsgReques
 
     // We need to construct a reply message - it will always be read through a view so it
     // doesn't matter whether we use OpMsgReplyBuilder or LegacyReplyBuilder
-    auto message = rpc::OpMsgReplyBuilder{}.setCommandReply(reply).done();
+    auto message = uassertStatusOK(rpc::OpMsgReplyBuilder{}.setCommandReply(reply).done());
     auto replyView = std::make_unique<rpc::OpMsgReply>(&message);
     return rpc::UniqueReply(std::move(message), std::move(replyView));
 }

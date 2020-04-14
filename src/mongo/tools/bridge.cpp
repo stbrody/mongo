@@ -344,7 +344,7 @@ DbResponse ServiceEntryPointBridge::handleRequest(OperationContext* opCtx, const
         if (!status->isOK()) {
             commandReply = StatusWith<BSONObj>(*status);
         }
-        return {replyBuilder->setCommandReply(std::move(commandReply)).done()};
+        return {uassertStatusOK(replyBuilder->setCommandReply(std::move(commandReply)).done())};
     }
 
 

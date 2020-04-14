@@ -1068,7 +1068,7 @@ DbResponse Strategy::clientCommand(OperationContext* opCtx, const Message& m) {
             dbResponse.nextInvocation = reply->getNextInvocation();
         }
     }
-    dbResponse.response = reply->done();
+    dbResponse.response = uassertStatusOK(reply->done());
 
     return dbResponse;
 }

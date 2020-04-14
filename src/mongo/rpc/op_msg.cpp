@@ -229,16 +229,30 @@ OpMsg OpMsg::parse(const Message& message) try {
     throw;
 }
 
-Message OpMsg::serialize() const {
-    OpMsgBuilder builder;
+namespace {
+void serializeHelper(const std::vector<OpMsg::DocumentSequence>& sequences,
+                     const BSONObj& body,
+                     OpMsgBuilder* output) {
     for (auto&& seq : sequences) {
-        auto docSeq = builder.beginDocSequence(seq.name);
+        auto docSeq = output->beginDocSequence(seq.name);
         for (auto&& obj : seq.objs) {
             docSeq.append(obj);
         }
     }
-    builder.beginBody().appendElements(body);
+    output->beginBody().appendElements(body);
+}
+}  // namespace
+
+StatusWith<Message> OpMsg::serialize() const {
+    OpMsgBuilder builder;
+    serializeHelper(sequences, body, &builder);
     return builder.finish();
+}
+
+Message OpMsg::serializeWithoutSizeChecking() const {
+    OpMsgBuilder builder;
+    serializeHelper(sequences, body, &builder);
+    return builder.finishWithoutSizeChecking();
 }
 
 void OpMsg::shareOwnershipWith(const ConstSharedBuffer& buffer) {
@@ -292,7 +306,20 @@ BSONObjBuilder OpMsgBuilder::resumeBody() {
 
 AtomicWord<bool> OpMsgBuilder::disableDupeFieldCheck_forTest{false};
 
-Message OpMsgBuilder::finish() {
+StatusWith<Message> OpMsgBuilder::finish() {
+    const auto size = _buf.len();
+    if (size > BSONObjMaxInternalSize) {
+        std::string msg = str::stream()
+            << "BSON size limit hit while building Message. Size: " << size << " (0x"
+            << integerToHex(size) << "); maxSize: " << BSONObjMaxInternalSize << "("
+            << (BSONObjMaxInternalSize / (1024 * 1024)) << "MB)";
+        return Status{ErrorCodes::BSONObjectTooLarge, msg};
+    }
+
+    return finishWithoutSizeChecking();
+}
+
+Message OpMsgBuilder::finishWithoutSizeChecking() {
     if (kDebugBuild && !disableDupeFieldCheck_forTest.load()) {
         std::set<StringData> seenFields;
         for (auto elem : resumeBody().asTempObj()) {

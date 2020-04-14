@@ -1397,7 +1397,7 @@ DbResponse receivedCommands(OperationContext* opCtx,
         }
     }
 
-    dbResponse.response = replyBuilder->done();
+    dbResponse.response = uassertStatusOK(replyBuilder->done());
     CurOp::get(opCtx)->debug().responseLength = dbResponse.response.header().dataLen();
 
     return dbResponse;

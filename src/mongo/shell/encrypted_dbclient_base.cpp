@@ -206,7 +206,7 @@ std::pair<rpc::UniqueReply, DBClientBase*> EncryptedDBClientBase::processRespons
 
     rpc::OpMsgReplyBuilder replyBuilder;
     replyBuilder.setCommandReply(StatusWith<BSONObj>(decryptedDoc));
-    auto msg = replyBuilder.done();
+    auto msg = uassertStatusOK(replyBuilder.done());
 
     auto host = _conn->getServerAddress();
     auto reply = _conn->parseCommandReplyMessage(host, msg);

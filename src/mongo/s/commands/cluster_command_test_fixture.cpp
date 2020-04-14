@@ -120,7 +120,7 @@ DbResponse ClusterCommandTestFixture::runCommand(BSONObj cmd) {
     auto clusterGLE = ClusterLastErrorInfo::get(client.get());
     clusterGLE->newRequest();
 
-    return Strategy::clientCommand(opCtx.get(), opMsgRequest.serialize());
+    return Strategy::clientCommand(opCtx.get(), uassertStatusOK(opMsgRequest.serialize()));
 }
 
 void ClusterCommandTestFixture::runCommandSuccessful(BSONObj cmd, bool isTargeted) {

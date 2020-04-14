@@ -119,7 +119,8 @@ protected:
                              long long cursorId,
                              std::vector<BSONObj> firstBatch) {
         auto cursorRes = CursorResponse(nss, cursorId, firstBatch);
-        return OpMsg{cursorRes.toBSON(CursorResponse::ResponseType::InitialResponse)}.serialize();
+        return uassertStatusOK(
+            OpMsg{cursorRes.toBSON(CursorResponse::ResponseType::InitialResponse)}.serialize());
     }
 
     /**
@@ -129,8 +130,8 @@ protected:
                                 long long cursorId,
                                 std::vector<BSONObj> batch) {
         auto cursorRes = CursorResponse(nss, cursorId, batch);
-        return OpMsg{cursorRes.toBSON(CursorResponse::ResponseType::SubsequentResponse)}
-            .serialize();
+        return uassertStatusOK(
+            OpMsg{cursorRes.toBSON(CursorResponse::ResponseType::SubsequentResponse)}.serialize());
     }
     /**
      * A generic non-ok OP_MSG command response.
@@ -141,7 +142,7 @@ protected:
         bodyBob.append("ok", 0);
         bodyBob.append("code", err);
         builder.setBody(bodyBob.done());
-        return builder.finish();
+        return invariantStatusOK(builder.finish());
     }
 
     BSONObj docObj(int id) {

@@ -103,8 +103,8 @@ Future<executor::TaskExecutor::ResponseStatus> AsyncWorkScheduler::scheduleRemot
             const auto service = opCtx->getServiceContext();
             auto start = _executor->now();
 
-            auto requestOpMsg =
-                OpMsgRequest::fromDBAndBody(NamespaceString::kAdminDb, commandObj).serialize();
+            auto requestOpMsg = uassertStatusOK(
+                OpMsgRequest::fromDBAndBody(NamespaceString::kAdminDb, commandObj).serialize());
             const auto replyOpMsg = OpMsg::parseOwned(
                 service->getServiceEntryPoint()->handleRequest(opCtx, requestOpMsg).response);
 

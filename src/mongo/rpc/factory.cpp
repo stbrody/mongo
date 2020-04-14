@@ -46,7 +46,7 @@
 namespace mongo {
 namespace rpc {
 
-Message messageFromOpMsgRequest(Protocol proto, const OpMsgRequest& request) {
+StatusWith<Message> messageFromOpMsgRequest(Protocol proto, const OpMsgRequest& request) {
     switch (proto) {
         case Protocol::kOpMsg:
             return request.serialize();

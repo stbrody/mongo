@@ -63,7 +63,7 @@ std::string stateToString(ServiceStateMachine::State state) {
 Message buildOpMsg(BSONObj input) {
     OpMsgBuilder builder;
     builder.setBody(input);
-    return builder.finish();
+    return uassertStatusOK(builder.finish());
 }
 
 class MockSEP : public ServiceEntryPoint {

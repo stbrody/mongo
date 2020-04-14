@@ -57,7 +57,7 @@ public:
 
     void reset() final;
 
-    Message done() final;
+    StatusWith<Message> done() final;
 
     Protocol getProtocol() const final;
 

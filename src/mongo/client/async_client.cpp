@@ -275,7 +275,8 @@ Future<rpc::UniqueReply> AsyncDBClient::runCommand(OpMsgRequest request,
                                                    const BatonHandle& baton,
                                                    bool fireAndForget) {
     invariant(_negotiatedProtocol);
-    auto requestMsg = rpc::messageFromOpMsgRequest(*_negotiatedProtocol, std::move(request));
+    auto requestMsg =
+        uassertStatusOK(rpc::messageFromOpMsgRequest(*_negotiatedProtocol, std::move(request)));
     if (fireAndForget) {
         OpMsg::setFlag(&requestMsg, OpMsg::kMoreToCome);
     }
@@ -287,7 +288,7 @@ Future<rpc::UniqueReply> AsyncDBClient::runCommand(OpMsgRequest request,
             // Return a mock status OK response since we do not expect a real response.
             OpMsgBuilder builder;
             builder.setBody(BSON("ok" << 1));
-            Message responseMsg = builder.finish();
+            Message responseMsg = invariantStatusOK(builder.finish());
             responseMsg.header().setResponseToMsgId(msgId);
             responseMsg.header().setId(msgId);
             return rpc::UniqueReply(responseMsg, rpc::makeReply(&responseMsg));
@@ -345,7 +346,8 @@ Future<void> AsyncDBClient::runExhaustCommand(OpMsgRequest request,
                                               RemoteCommandCallbackFn&& cb,
                                               const BatonHandle& baton) {
     invariant(_negotiatedProtocol);
-    auto requestMsg = rpc::messageFromOpMsgRequest(*_negotiatedProtocol, std::move(request));
+    auto requestMsg =
+        uassertStatusOK(rpc::messageFromOpMsgRequest(*_negotiatedProtocol, std::move(request)));
     OpMsg::setFlag(&requestMsg, OpMsg::kExhaustSupported);
 
     auto clkSource = _svcCtx->getPreciseClockSource();

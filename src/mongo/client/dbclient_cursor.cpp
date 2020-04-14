@@ -79,8 +79,8 @@ Message assembleCommandRequest(DBClientBase* cli,
         request.body = bodyBob.obj();
     }
 
-    return rpc::messageFromOpMsgRequest(
-        cli->getClientRPCProtocols(), cli->getServerRPCProtocols(), std::move(request));
+    return uassertStatusOK(rpc::messageFromOpMsgRequest(
+        cli->getClientRPCProtocols(), cli->getServerRPCProtocols(), std::move(request)));
 }
 
 }  // namespace

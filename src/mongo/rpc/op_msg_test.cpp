@@ -681,7 +681,7 @@ TEST(OpMsgSerializer, JustBody) {
     OpMsg msg;
     msg.body = fromjson("{ping: 1}");
 
-    testSerializer(msg.serialize(),
+    testSerializer(uassertStatusOK(msg.serialize()),
                    OpMsgBytes{
                        kNoFlags,  //
                        kBodySection,
@@ -694,7 +694,7 @@ TEST(OpMsgSerializer, BodyAndSequence) {
     msg.body = fromjson("{ping: 1}");
     msg.sequences = {{"docs", {fromjson("{a:1}"), fromjson("{a:2}")}}};
 
-    testSerializer(msg.serialize(),
+    testSerializer(uassertStatusOK(msg.serialize()),
                    OpMsgBytes{
                        kNoFlags,  //
                        kDocSequenceSection,
@@ -714,7 +714,7 @@ TEST(OpMsgSerializer, BodyAndEmptySequence) {
     msg.body = fromjson("{ping: 1}");
     msg.sequences = {{"docs", {}}};
 
-    testSerializer(msg.serialize(),
+    testSerializer(uassertStatusOK(msg.serialize()),
                    OpMsgBytes{
                        kNoFlags,  //
                        kDocSequenceSection,
@@ -735,7 +735,7 @@ TEST(OpMsgSerializer, BodyAndTwoSequences) {
         {"b", {fromjson("{b: 1}")}},
     };
 
-    testSerializer(msg.serialize(),
+    testSerializer(uassertStatusOK(msg.serialize()),
                    OpMsgBytes{
                        kNoFlags,  //
                        kDocSequenceSection,
@@ -770,7 +770,7 @@ TEST(OpMsgSerializer, BodyAndSequenceInPlace) {
     builder.beginBody().append("ping", 1);
     builder.resumeBody().append("$db", "foo");
 
-    testSerializer(builder.finish(),
+    testSerializer(uassertStatusOK(builder.finish()),
                    OpMsgBytes{
                        kNoFlags,  //
                        kDocSequenceSection,
@@ -817,7 +817,7 @@ TEST(OpMsgSerializer, BodyAndInPlaceSequenceInPlaceWithReset) {
 
     builder.beginBody().append("pong", 1);
 
-    testSerializer(builder.finish(),
+    testSerializer(uassertStatusOK(builder.finish()),
                    OpMsgBytes{
                        kNoFlags,  //
                        kDocSequenceSection,

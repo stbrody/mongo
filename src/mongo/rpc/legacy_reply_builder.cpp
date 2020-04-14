@@ -122,7 +122,7 @@ void LegacyReplyBuilder::reset() {
 }
 
 
-Message LegacyReplyBuilder::done() {
+StatusWith<Message> LegacyReplyBuilder::done() {
     invariant(_haveCommandReply);
 
     QueryResult::View qr = _builder.buf();
@@ -134,7 +134,16 @@ Message LegacyReplyBuilder::done() {
         qr.setResultFlagsToOk();
     }
 
-    qr.msgdata().setLen(_builder.len());
+    const auto size = _builder.len();
+    if (size > BSONObjMaxInternalSize) {
+        std::string msg = str::stream()
+            << "BSON size limit hit while building Message. Size: " << size << " (0x"
+            << integerToHex(size) << "); maxSize: " << BSONObjMaxInternalSize << "("
+            << (BSONObjMaxInternalSize / (1024 * 1024)) << "MB)";
+        return Status{ErrorCodes::BSONObjectTooLarge, msg};
+    }
+
+    qr.msgdata().setLen(size);
     qr.msgdata().setOperation(opReply);
     qr.setCursorId(0);
     qr.setStartingFrom(0);

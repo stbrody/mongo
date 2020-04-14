@@ -189,7 +189,7 @@ DBClientBase* DBClientBase::runFireAndForgetCommand(OpMsgRequest request) {
         request.body = metadataBob.obj();
     }
 
-    auto requestMsg = request.serialize();
+    auto requestMsg = uassertStatusOK(request.serialize());
     OpMsg::setFlag(&requestMsg, OpMsg::kMoreToCome);
     say(requestMsg);
     return this;
@@ -211,8 +211,8 @@ std::pair<rpc::UniqueReply, DBClientBase*> DBClientBase::runCommandWithTarget(
         request.body = metadataBob.obj();
     }
 
-    auto requestMsg =
-        rpc::messageFromOpMsgRequest(getClientRPCProtocols(), getServerRPCProtocols(), request);
+    auto requestMsg = uassertStatusOK(
+        rpc::messageFromOpMsgRequest(getClientRPCProtocols(), getServerRPCProtocols(), request));
 
     Message replyMsg;
 

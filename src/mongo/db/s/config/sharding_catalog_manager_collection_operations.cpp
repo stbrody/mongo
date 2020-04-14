@@ -185,12 +185,14 @@ Status updateConfigDocumentInTxn(OperationContext* opCtx,
 
     const auto cmdObj = bob.obj();
 
-    const auto replyOpMsg = OpMsg::parseOwned(
-        opCtx->getServiceContext()
-            ->getServiceEntryPoint()
-            ->handleRequest(opCtx,
-                            OpMsgRequest::fromDBAndBody(nss.db().toString(), cmdObj).serialize())
-            .response);
+    const auto msg = OpMsgRequest::fromDBAndBody(nss.db().toString(), cmdObj).serialize();
+    if (!msg.isOK()) {
+        return msg.getStatus();
+    }
+    const auto replyOpMsg = OpMsg::parseOwned(opCtx->getServiceContext()
+                                                  ->getServiceEntryPoint()
+                                                  ->handleRequest(opCtx, msg.getValue())
+                                                  .response);
 
     return getStatusFromCommandResult(replyOpMsg.body);
 }
@@ -227,14 +229,15 @@ Status commitTxnForConfigDocument(OperationContext* opCtx, TxnNumber txnNumber) 
 
     const auto cmdObj = bob.obj();
 
-    const auto replyOpMsg =
-        OpMsg::parseOwned(opCtx->getServiceContext()
-                              ->getServiceEntryPoint()
-                              ->handleRequest(opCtx,
-                                              OpMsgRequest::fromDBAndBody(
-                                                  NamespaceString::kAdminDb.toString(), cmdObj)
-                                                  .serialize())
-                              .response);
+    const auto swMsg =
+        OpMsgRequest::fromDBAndBody(NamespaceString::kAdminDb.toString(), cmdObj).serialize();
+    if (!swMsg.isOK()) {
+        return swMsg.getStatus();
+    }
+    const auto replyOpMsg = OpMsg::parseOwned(opCtx->getServiceContext()
+                                                  ->getServiceEntryPoint()
+                                                  ->handleRequest(opCtx, swMsg.getValue())
+                                                  .response);
 
     return getStatusFromCommandResult(replyOpMsg.body);
 }

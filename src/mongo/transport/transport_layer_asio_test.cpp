@@ -275,7 +275,7 @@ public:
     void sendMessage() {
         OpMsgBuilder builder;
         builder.setBody(BSON("ping" << 1));
-        Message msg = builder.finish();
+        Message msg = uassertStatusOK(builder.finish());
         msg.header().setResponseToMsgId(0);
         msg.header().setId(0);
         OpMsg::appendChecksum(&msg);

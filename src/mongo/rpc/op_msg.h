@@ -118,7 +118,14 @@ struct OpMsg {
         return msg;
     }
 
-    Message serialize() const;
+    StatusWith<Message> serialize() const;
+
+    /**
+     * Like serialize() but doesn't enforce max BSON size limits. This is almost never what you
+     * want. Prefer serialize() unless there's a good reason to skip the size check.
+     */
+    Message serializeWithoutSizeChecking() const;
+
 
     /**
      * Makes all BSONObjs in this object share ownership with buffer.
@@ -235,8 +242,16 @@ public:
     /**
      * Finish building and return a Message ready to give to the networking layer for transmission.
      * It is illegal to call any methods on this object after calling this.
+     * Can return BSONObjectTooLarge if the internal buffer has grown too large to be converted
+     * to a Message within the BSON size limit.
      */
-    Message finish();
+    StatusWith<Message> finish();
+
+    /**
+     * Like finish() but doesn't enforce max BSON size limits. This is almost never what you want.
+     * Prefer finish() unless there's a good reason to skip the size check.
+     */
+    Message finishWithoutSizeChecking();
 
     /**
      * Reset this object to its initial empty state. All previously appended data is lost.

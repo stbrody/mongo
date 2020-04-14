@@ -155,7 +155,7 @@ protected:
     }
 
     mongo::BSONObj performRpc(MongoDBCAPIClientPtr& client, mongo::OpMsgRequest request) {
-        auto inputMessage = request.serialize();
+        auto inputMessage = uassertStatusOK(request.serialize());
 
         // declare the output size and pointer
         void* output;

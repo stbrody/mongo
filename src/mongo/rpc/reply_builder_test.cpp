@@ -127,7 +127,7 @@ TEST(LegacyReplyBuilder, CommandError) {
     rpc::LegacyReplyBuilder replyBuilder;
     replyBuilder.setCommandReply(status, extraObj);
     replyBuilder.getBodyBuilder().appendElements(metadata);
-    auto msg = replyBuilder.done();
+    auto msg = uassertStatusOK(replyBuilder.done());
 
     rpc::LegacyReply parsed(&msg);
 
@@ -150,7 +150,7 @@ TEST(OpMsgReplyBuilder, CommandError) {
     rpc::OpMsgReplyBuilder replyBuilder;
     replyBuilder.setCommandReply(status, extraObj);
     replyBuilder.getBodyBuilder().appendElements(metadata);
-    auto msg = replyBuilder.done();
+    auto msg = uassertStatusOK(replyBuilder.done());
     msg.header().setId(124);
     msg.header().setResponseToMsgId(123);
     OpMsg::appendChecksum(&msg);
@@ -166,6 +166,22 @@ TEST(OpMsgReplyBuilder, CommandError) {
     ASSERT_BSONOBJ_EQ(parsed.getCommandReply(), body);
 }
 
+TEST(OpMsgReplyBuilder, MessageOverBSONSizeLimit) {
+    rpc::OpMsgReplyBuilder r;
+    std::string bigStr(1024 * 1024 * 16, 'a');
+
+    {
+        // 'builder' is an unowned BSONObjBuilder and thus does none of its own size checking,
+        // allowing us to grow the OpMsgReplyBuilder past the bson object size limit.
+        auto builder = r.getBodyBuilder();
+        for (auto i = 0; i < 2; i++) {
+            builder.append("field" + std::to_string(i), bigStr);
+        }
+    }
+
+    ASSERT_EQ(ErrorCodes::BSONObjectTooLarge, r.done().getStatus());
+}
+
 template <typename T>
 void testRoundTrip(rpc::ReplyBuilderInterface& replyBuilder, bool unifiedBodyAndMetadata) {
     auto metadata = buildMetadata();
@@ -174,7 +190,7 @@ void testRoundTrip(rpc::ReplyBuilderInterface& replyBuilder, bool unifiedBodyAnd
     replyBuilder.setCommandReply(commandReply);
     replyBuilder.getBodyBuilder().appendElements(metadata);
 
-    auto msg = replyBuilder.done();
+    auto msg = uassertStatusOK(replyBuilder.done());
     msg.header().setId(124);
     msg.header().setResponseToMsgId(123);
     OpMsg::appendChecksum(&msg);
@@ -202,7 +218,7 @@ void testErrors(rpc::ReplyBuilderInterface& replyBuilder) {
     replyBuilder.setCommandReply(status);
     replyBuilder.getBodyBuilder().appendElements(buildMetadata());
 
-    auto msg = replyBuilder.done();
+    auto msg = uassertStatusOK(replyBuilder.done());
     msg.header().setId(124);
     msg.header().setResponseToMsgId(123);
     OpMsg::appendChecksum(&msg);
