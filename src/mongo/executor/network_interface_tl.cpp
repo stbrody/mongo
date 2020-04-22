@@ -321,7 +321,7 @@ AsyncDBClient* NetworkInterfaceTL::RequestState::getClient(const ConnectionHandl
 }
 
 void NetworkInterfaceTL::CommandStateBase::setTimer() {
-    if (deadline == RemoteCommandRequest::kNoExpirationDate) {
+    if (deadline == NetworkInterface::kNoExpirationDate) {
         return;
     }
 
@@ -968,7 +968,7 @@ void NetworkInterfaceTL::ExhaustCommandState::continueExhaustRequest(
 
     // Reset the stopwatch to measure the correct duration for the folowing reply
     stopwatch.restart();
-    if (deadline != RemoteCommandRequest::kNoExpirationDate) {
+    if (deadline != NetworkInterface::kNoExpirationDate) {
         deadline = stopwatch.start() + requestOnAny.timeout;
     }
     setTimer();

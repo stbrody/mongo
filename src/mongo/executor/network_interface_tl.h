@@ -152,7 +152,7 @@ private:
 
         RemoteCommandRequestOnAny requestOnAny;
         TaskExecutor::CallbackHandle cbHandle;
-        Date_t deadline = RemoteCommandRequest::kNoExpirationDate;
+        Date_t deadline = NetworkInterface::kNoExpirationDate;
 
         ClockSource::StopWatch stopwatch;
 
