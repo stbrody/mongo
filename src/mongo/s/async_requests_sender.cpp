@@ -206,6 +206,7 @@ auto AsyncRequestsSender::RemoteData::scheduleRemoteCommand(std::vector<HostAndP
                                                 _ars->_metadataObj,
                                                 _ars->_opCtx,
                                                 hedgeOptions);
+    request.updateTimeoutFromOpCtxDeadline(_ars->_opCtx);
 
     // We have to make a promise future pair because the TaskExecutor doesn't currently support a
     // future returning variant of scheduleRemoteCommand
