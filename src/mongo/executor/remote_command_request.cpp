@@ -141,7 +141,7 @@ std::string RemoteCommandRequestImpl<T>::toString() const {
     out << " db:" << dbname;
 
     if (dateScheduled && timeout != kNoTimeout) {
-        out << " expDate:" << Date_t(*dateScheduled + timeout).toString();
+        out << " expDate:" << (*dateScheduled + timeout).toString();
     }
 
     if (hedgeOptions) {

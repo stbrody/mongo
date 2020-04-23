@@ -38,8 +38,6 @@ namespace executor {
 NetworkInterface::NetworkInterface() {}
 NetworkInterface::~NetworkInterface() {}
 
-constexpr Date_t NetworkInterface::kNoExpirationDate;
-
 MONGO_FAIL_POINT_DEFINE(networkInterfaceSendRequestsToTargetHostsInAlphabeticalOrder);
 MONGO_FAIL_POINT_DEFINE(networkInterfaceDiscardCommandsBeforeAcquireConn);
 MONGO_FAIL_POINT_DEFINE(networkInterfaceHangCommandsAfterAcquireConn);
