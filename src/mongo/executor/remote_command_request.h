@@ -66,6 +66,11 @@ struct RemoteCommandRequestBase {
                              boost::optional<HedgeOptions> hedgeOptions,
                              FireAndForgetMode fireAndForgetMode);
 
+    /**
+     * Sets 'timeout' to the min of the current 'timeout' value and the remaining time on the OpCtx.
+     */
+    void updateTimeoutFromOpCtxDeadline(const OperationContext* opCtx);
+
     // Internal id of this request. Not interpreted and used for tracing purposes only.
     RequestId id;
 
@@ -89,6 +94,9 @@ struct RemoteCommandRequestBase {
     FireAndForgetMode fireAndForgetMode;
 
     Milliseconds timeout = kNoTimeout;
+
+    // todo comment
+    bool timeoutSetFromOpCtxDeadline = false;
 
     // Time when the request was scheduled.
     boost::optional<Date_t> dateScheduled;

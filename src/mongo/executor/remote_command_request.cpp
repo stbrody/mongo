@@ -76,12 +76,25 @@ RemoteCommandRequestBase::RemoteCommandRequestBase(RequestId requestId,
         cmdObj = cmdObj.addField(BSON("clientOperationKey" << operationKey.get()).firstElement());
     }
 
+    // TODO Remove check against opctx deadline.
     timeout = opCtx ? std::min<Milliseconds>(opCtx->getRemainingMaxTimeMillis(), timeoutMillis)
                     : timeoutMillis;
 }
 
 RemoteCommandRequestBase::RemoteCommandRequestBase()
     : id(requestIdCounter.addAndFetch(1)), operationKey(UUID::gen()) {}
+
+void RemoteCommandRequestBase::updateTimeoutFromOpCtxDeadline(const OperationContext* opCtx) {
+    if (!opCtx || !opCtx->hasDeadline()) {
+        return;
+    }
+
+    const auto opCtxTimeout = opCtx->getRemainingMaxTimeMillis();
+    if (timeout == kNoTimeout || opCtxTimeout <= timeout) {
+        timeout = opCtxTimeout;
+        timeoutSetFromOpCtxDeadline = true;
+    }
+}
 
 template <typename T>
 RemoteCommandRequestImpl<T>::RemoteCommandRequestImpl() = default;
