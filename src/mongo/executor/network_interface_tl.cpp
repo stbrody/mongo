@@ -762,25 +762,39 @@ void NetworkInterfaceTL::RequestManager::trySend(
 
     if (requestState->isHedge) {
         invariant(cmdStatePtr->requestOnAny.hedgeOptions);
-        auto maxTimeMS = request.hedgeOptions->maxTimeMSForHedgedReads;
+        auto hedgingMaxTimeMS = Milliseconds(request.hedgeOptions->maxTimeMSForHedgedReads);
 
-        BSONObjBuilder updatedCmdBuilder;
-        updatedCmdBuilder.appendElements(request.cmdObj);
-        updatedCmdBuilder.append(kMaxTimeMSOpOnlyField, maxTimeMS);
-        request.cmdObj = updatedCmdBuilder.obj();
-
-        LOGV2_DEBUG(4647200,
-                    2,
-                    "Set maxTimeMS for request",
-                    "maxTime"_attr = Milliseconds(maxTimeMS),
-                    "requestId"_attr = cmdStatePtr->requestOnAny.id,
-                    "target"_attr = cmdStatePtr->requestOnAny.target[idx]);
+        if (request.timeout == RemoteCommandRequest::kNoTimeout ||
+            hedgingMaxTimeMS < request.timeout) {
+            LOGV2_DEBUG(4647200,
+                        2,
+                        "Set maxTimeMSOpOnly for hedged request",
+                        "originalMaxTime"_attr = request.timeout,
+                        "reducedMaxTime"_attr = hedgingMaxTimeMS,
+                        "requestId"_attr = cmdStatePtr->requestOnAny.id,
+                        "target"_attr = cmdStatePtr->requestOnAny.target[idx]);
+            request.timeout = hedgingMaxTimeMS;
+        }
 
         if (cmdStatePtr->interface->_svcCtx) {
             auto hm = HedgingMetrics::get(cmdStatePtr->interface->_svcCtx);
             invariant(hm);
             hm->incrementNumTotalHedgedOperations();
         }
+    }
+
+    if (request.timeout != RemoteCommandRequest::kNoTimeout) {
+        LOGV2_DEBUG(47429002,
+                    2,
+                    "Set maxTimeMSOpOnly for request",
+                    "maxTimeMSOpOnly"_attr = request.timeout,
+                    "requestId"_attr = cmdStatePtr->requestOnAny.id,
+                    "target"_attr = cmdStatePtr->requestOnAny.target[idx]);
+
+        BSONObjBuilder updatedCmdBuilder;
+        updatedCmdBuilder.appendElements(request.cmdObj);
+        updatedCmdBuilder.append(kMaxTimeMSOpOnlyField, request.timeout.count());
+        request.cmdObj = updatedCmdBuilder.obj();
     }
 
     requestState->send(std::move(swConn), request);

@@ -31,6 +31,8 @@ jsTestLog("Run a separate write.");
 assert.commandFailedWithCode(coll.runCommand(
     {insert: collName, documents: [{_id: 1, nonTxn: 1}], maxTimeMS: 100}), ErrorCodes.MaxTimeMSExpired);
 
+// TODO there's still a race here where the write could have timed out on mongos but not mongod.
+
 jsTestLog("Aborting the transaction.");
 session.abortTransaction();
 
