@@ -769,12 +769,6 @@ void NetworkInterfaceTL::RequestManager::trySend(
 
     RemoteCommandRequest request({cmdStatePtr->requestOnAny, idx});
 
-    //    logd("BBBBBBBBBBBB: requestId: {}, target: {}, timeout: {}, cmdObj: {}",
-    //         cmdStatePtr->requestOnAny.id,
-    //         cmdStatePtr->requestOnAny.target[idx],
-    //         request.timeout,
-    //         request.cmdObj);
-
     if (requestState->isHedge) {
         invariant(cmdStatePtr->requestOnAny.hedgeOptions);
         auto hedgingMaxTimeMS = Milliseconds(request.hedgeOptions->maxTimeMSForHedgedReads);
@@ -783,7 +777,7 @@ void NetworkInterfaceTL::RequestManager::trySend(
             hedgingMaxTimeMS < request.timeout) {
             LOGV2_DEBUG(4647200,
                         2,
-                        "BBBBBBBBBBB Set maxTimeMSOpOnly for hedged request",
+                        "Set maxTimeMSOpOnly for hedged request",
                         "originalMaxTime"_attr = request.timeout,
                         "reducedMaxTime"_attr = hedgingMaxTimeMS,
                         "requestId"_attr = cmdStatePtr->requestOnAny.id,
@@ -802,7 +796,7 @@ void NetworkInterfaceTL::RequestManager::trySend(
         WireSpec::instance().isInternalClient) {
         LOGV2_DEBUG(47429002,
                     2,
-                    "BBBBBBBBBBB Set maxTimeMSOpOnly for request",
+                    "Set maxTimeMSOpOnly for request",
                     "maxTimeMSOpOnly"_attr = request.timeout,
                     "requestId"_attr = cmdStatePtr->requestOnAny.id,
                     "target"_attr = cmdStatePtr->requestOnAny.target[idx]);
