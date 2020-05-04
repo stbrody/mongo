@@ -76,15 +76,13 @@ RemoteCommandRequestBase::RemoteCommandRequestBase(RequestId requestId,
         cmdObj = cmdObj.addField(BSON("clientOperationKey" << operationKey.get()).firstElement());
     }
 
-    // TODO Remove check against opctx deadline.
-    timeout = opCtx ? std::min<Milliseconds>(opCtx->getRemainingMaxTimeMillis(), timeoutMillis)
-                    : timeoutMillis;
+    _updateTimeoutFromOpCtxDeadline(opCtx);
 }
 
 RemoteCommandRequestBase::RemoteCommandRequestBase()
     : id(requestIdCounter.addAndFetch(1)), operationKey(UUID::gen()) {}
 
-void RemoteCommandRequestBase::updateTimeoutFromOpCtxDeadline(const OperationContext* opCtx) {
+void RemoteCommandRequestBase::_updateTimeoutFromOpCtxDeadline(const OperationContext* opCtx) {
     if (!opCtx || !opCtx->hasDeadline()) {
         return;
     }
