@@ -326,11 +326,7 @@ void NetworkInterfaceTL::CommandStateBase::setTimer() {
         return;
     }
 
-    // todo comment
-    const auto timeoutCode = requestOnAny.timeoutSetFromOpCtxDeadline
-        ? ErrorCodes::MaxTimeMSExpired
-        : ErrorCodes::NetworkInterfaceExceededTimeLimit;
-
+    const auto timeoutCode = requestOnAny.timeoutCode;
     const auto nowVal = interface->now();
     if (nowVal >= deadline) {
         auto connDuration = stopwatch.elapsed();

@@ -92,7 +92,7 @@ void RemoteCommandRequestBase::updateTimeoutFromOpCtxDeadline(const OperationCon
     const auto opCtxTimeout = opCtx->getRemainingMaxTimeMillis();
     if (timeout == kNoTimeout || opCtxTimeout <= timeout) {
         timeout = opCtxTimeout;
-        timeoutSetFromOpCtxDeadline = true;
+        timeoutCode = opCtx->getTimeoutError();
     }
 }
 

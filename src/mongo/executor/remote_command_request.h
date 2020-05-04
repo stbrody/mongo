@@ -32,6 +32,7 @@
 #include <iosfwd>
 #include <string>
 
+#include "mongo/base/error_codes.h"
 #include "mongo/db/jsobj.h"
 #include "mongo/rpc/metadata.h"
 #include "mongo/transport/transport_layer.h"
@@ -94,9 +95,7 @@ struct RemoteCommandRequestBase {
     FireAndForgetMode fireAndForgetMode;
 
     Milliseconds timeout = kNoTimeout;
-
-    // todo comment
-    bool timeoutSetFromOpCtxDeadline = false;
+    ErrorCodes::Error timeoutCode = ErrorCodes::NetworkInterfaceExceededTimeLimit;
 
     // Time when the request was scheduled.
     boost::optional<Date_t> dateScheduled;
