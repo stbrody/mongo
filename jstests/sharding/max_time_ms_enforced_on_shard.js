@@ -21,6 +21,9 @@ const session = mongosDB.getMongo().startSession(sessionOptions);
 const sessionDb = session.getDatabase(dbName);
 const sessionColl = sessionDb[collName];
 
+// Disable maxTime enforcement on mongos so we can verify it's happening on mongod.
+assert.commandWorked(mongosDB.adminCommand({configureFailPoint: "maxTimeNeverTimeOut", mode:'alwaysOn'}));
+
 jsTestLog("Creating collection with insert.");
 assert.commandWorked(sessionColl.insert({_id: 0}));
 
@@ -32,13 +35,6 @@ jsTestLog("Run a separate write.");
 assert.commandFailedWithCode(
     coll.runCommand({insert: collName, documents: [{_id: 1, nonTxn: 1}], maxTimeMS: 100}),
     ErrorCodes.MaxTimeMSExpired);
-
-// Wait for the op to time out on the shard.
-assert.soon(function() {
-    let ops = st.shard0.getDB('admin').currentOp().inprog.filter(
-        op => op.ns == (dbName + "." + collName) && op.command && op.command.insert == colllName);
-    return ops.length == 0;
-});
 
 jsTestLog("Aborting the transaction.");
 session.abortTransaction();
