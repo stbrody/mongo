@@ -64,7 +64,8 @@ RemoteCommandRequestBase::RemoteCommandRequestBase(RequestId requestId,
       metadata(metadataObj),
       opCtx(opCtx),
       hedgeOptions(hedgeOptions),
-      fireAndForgetMode(fireAndForgetMode) {
+      fireAndForgetMode(fireAndForgetMode),
+      timeout(timeoutMillis) {
     // If there is a comment associated with the current operation, append it to the command that we
     // are about to dispatch to the shards.
     cmdObj = opCtx && opCtx->getComment() && !theCmdObj["comment"]
