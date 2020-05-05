@@ -3,6 +3,7 @@
 // not just on the mongos.
 //
 
+// todo change this test to set never timeout failpoint on mongos then wait for op to time out on shard
 (function() {
 'use strict';
 
@@ -32,7 +33,12 @@ assert.commandFailedWithCode(
     coll.runCommand({insert: collName, documents: [{_id: 1, nonTxn: 1}], maxTimeMS: 100}),
     ErrorCodes.MaxTimeMSExpired);
 
-// TODO there's still a race here where the write could have timed out on mongos but not mongod.
+// Wait for the op to time out on the shard.
+assert.soon(function() {
+    let ops = st.shard0.getDB('admin').currentOp().inprog.filter(
+        op => op.ns == (dbName + "." + collName) && op.command && op.command.insert == colllName);
+    return ops.length == 0;
+});
 
 jsTestLog("Aborting the transaction.");
 session.abortTransaction();
