@@ -121,11 +121,12 @@ assert.commandWorked(st.rs0.getPrimary().getDB('test').adminCommand(
         numExpectedMatches: 1
     });
 
-    // Verify that there is an additional listIndexes profiler entry on the primary shard.
+    // The listIndexes also won't show up in the profiler since operations that time out due to
+    // maxTimeMS don't show up in the profiler.
     profilerHasNumMatchingEntriesOrThrow({
         profileDB: primaryDB,
         filter: {ns: target.getFullName(), "command.listIndexes": target.getName()},
-        numExpectedMatches: 3
+        numExpectedMatches: 2
     });
 
     assert.commandWorked(primaryDB.getSiblingDB("admin").runCommand(
@@ -162,7 +163,7 @@ assert.commandWorked(st.rs0.getPrimary().getDB('test').adminCommand(
     profilerHasNumMatchingEntriesOrThrow({
         profileDB: primaryDB,
         filter: {ns: target.getFullName(), "command.listIndexes": target.getName()},
-        numExpectedMatches: 3
+        numExpectedMatches: 2
     });
 
     profilerHasNumMatchingEntriesOrThrow({
