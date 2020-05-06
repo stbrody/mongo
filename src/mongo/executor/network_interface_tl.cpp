@@ -43,6 +43,7 @@
 #include "mongo/transport/transport_layer_manager.h"
 #include "mongo/util/concurrency/idle_thread_block.h"
 #include "mongo/util/net/socket_utils.h"
+#include "mongo/util/stacktrace.h"
 
 namespace mongo {
 namespace executor {
@@ -330,10 +331,15 @@ void NetworkInterfaceTL::CommandStateBase::setTimer() {
     const auto nowVal = interface->now();
     if (nowVal >= deadline) {
         auto connDuration = stopwatch.elapsed();
+        if (requestOnAny.timeout == requestOnAny.kNoTimeout) {
+            logd("FFFFFFFFFFFFFF deadline hit with no timeout!!!");
+            printStackTrace();
+        }
         uasserted(timeoutCode,
                   str::stream() << "Remote command timed out while waiting to get a "
                                    "connection from the pool, took "
-                                << connDuration << ", timeout was set to " << requestOnAny.timeout);
+                                << connDuration << ", timeout was set to " << requestOnAny.timeout
+                                << ", deadline: " << deadline.toString());
     }
 
     // TODO reform with SERVER-41459
@@ -995,9 +1001,16 @@ void NetworkInterfaceTL::ExhaustCommandState::continueExhaustRequest(
 
     onReplyFn(onAnyResponse);
 
-    // Reset the stopwatch to measure the correct duration for the folowing reply
+    // Reset the stopwatch to measure the correct duration for the following reply
     stopwatch.restart();
     if (deadline != kNoExpirationDate) {
+        if (requestOnAny.timeout == requestOnAny.kNoTimeout) {
+            logd(
+                "GGGGGGGGGGGG updating deadline even though the request has no timeout. Original "
+                "deadline: {}, now: {}",
+                deadline,
+                stopwatch.start());
+        }
         deadline = stopwatch.start() + requestOnAny.timeout;
     }
     setTimer();
