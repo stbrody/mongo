@@ -3,7 +3,8 @@
 // not just on the mongos.
 //
 
-// todo change this test to set never timeout failpoint on mongos then wait for op to time out on shard
+// todo change this test to set never timeout failpoint on mongos then wait for op to time out on
+// shard
 (function() {
 'use strict';
 
@@ -22,7 +23,8 @@ const sessionDb = session.getDatabase(dbName);
 const sessionColl = sessionDb[collName];
 
 // Disable maxTime enforcement on mongos so we can verify it's happening on mongod.
-assert.commandWorked(mongosDB.adminCommand({configureFailPoint: "maxTimeNeverTimeOut", mode:'alwaysOn'}));
+assert.commandWorked(
+    mongosDB.adminCommand({configureFailPoint: "maxTimeNeverTimeOut", mode: 'alwaysOn'}));
 
 jsTestLog("Creating collection with insert.");
 assert.commandWorked(sessionColl.insert({_id: 0}));
