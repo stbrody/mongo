@@ -121,8 +121,8 @@ assert.commandWorked(st.rs0.getPrimary().getDB('test').adminCommand(
         numExpectedMatches: 1
     });
 
-    // The listIndexes also won't show up in the profiler since operations that time out due to
-    // maxTimeMS don't show up in the profiler.
+    // TODO(SERVER-47998): The listIndexes command should be sent to the primary shard,
+    // but due to SERVER-47998 it does not show up in the profiler.
     profilerHasNumMatchingEntriesOrThrow({
         profileDB: primaryDB,
         filter: {ns: target.getFullName(), "command.listIndexes": target.getName()},
