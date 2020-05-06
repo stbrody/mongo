@@ -319,6 +319,9 @@ Future<std::vector<HostAndPort>> ScanningReplicaSetMonitor::_getHostsOrRefresh(
                           << "ScanningReplicaSetMonitor for set " << getName() << " is removed");
     }
 
+    logd("DDDDDDDDDDDDDD2 maxWait: {}", maxWait);
+
+
     auto out = _state->getMatchingHosts(criteria);
     if (!out.empty())
         return {std::move(out)};
@@ -704,6 +707,8 @@ void Refresher::receivedIsMaster(const HostAndPort& from,
                                  int64_t latencyMicros,
                                  const BSONObj& replyObj) {
     _scan->waitingFor.erase(from);
+
+    logd("!!!!!!!!!!! isMasterReply from {}: {}", from, replyObj);
 
     const IsMasterReply reply(from, latencyMicros, replyObj);
 
