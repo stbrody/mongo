@@ -426,7 +426,6 @@ StatusWith<ShardRemote::AsyncCmdHandle> ShardRemote::_scheduleCommand(
 
     const auto swHost = _targeter->findHost(opCtx, readPrefWithMinOpTime);
     if (!swHost.isOK()) {
-        logd("CCCCCCCCCCC: {}", swHost.getStatus());
         return swHost.getStatus();
     }
 

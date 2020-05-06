@@ -49,7 +49,6 @@
 #include "mongo/platform/mutex.h"
 #include "mongo/rpc/metadata/egress_metadata_hook_list.h"
 #include "mongo/stdx/condition_variable.h"
-#include "mongo/util/stacktrace.h"
 #include "mongo/util/string_map.h"
 #include "mongo/util/timer.h"
 
@@ -247,7 +246,6 @@ SemiFuture<std::vector<HostAndPort>> StreamableReplicaSetMonitor::getHostsOrRefr
 
     // start counting from the beginning of the operation
     const auto deadline = _executor->now() + ((maxWait > kZeroMs) ? maxWait : kZeroMs);
-    logd("DDDDDDDDDDDDDD1 deadline: {}, maxWait: {}", deadline, maxWait);
 
     // try to satisfy query immediately
     auto immediateResult = _getHosts(criteria);
@@ -265,8 +263,6 @@ SemiFuture<std::vector<HostAndPort>> StreamableReplicaSetMonitor::getHostsOrRefr
     // fail fast on timeout
     const Date_t& now = _executor->now();
     if (deadline <= now) {
-        logd("EEEEEEEEEEEE: timeout hit selecting node!");
-        printStackTrace();
         return _makeUnsatisfiedReadPrefError(criteria);
     }
 
@@ -309,7 +305,6 @@ SemiFuture<std::vector<HostAndPort>> StreamableReplicaSetMonitor::_enqueueOutsta
                 return;
             }
 
-            logd("EEEEEEEEEEEEE2 timeout hit");
             const auto errorStatus = _makeUnsatisfiedReadPrefError(query->criteria);
             query->promise.setError(errorStatus);
             query->done = true;

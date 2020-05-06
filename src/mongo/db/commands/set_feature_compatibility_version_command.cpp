@@ -145,7 +145,6 @@ public:
              const std::string& dbname,
              const BSONObj& cmdObj,
              BSONObjBuilder& result) {
-        logd("BBBBBBBBBBBB cmdObj: {}", cmdObj);
         // Always wait for at least majority writeConcern to ensure all writes involved in the
         // upgrade process cannot be rolled back. There is currently no mechanism to specify a
         // default writeConcern, so we manually call waitForWriteConcern upon exiting this command.

@@ -1006,7 +1006,7 @@ void execCommandDatabase(OperationContext* opCtx,
             } else if (fieldName == QueryRequest::kMaxTimeMSOpOnlyField) {
                 uassert(ErrorCodes::InvalidOptions,
                         "Can not specify maxTimeMSOpOnly for non internal clients",
-                        isInternalClient /* || command->getName() == "isMaster"*/);
+                        isInternalClient);
                 maxTimeMSOpOnlyField = element;
             } else if (fieldName == "allowImplicitCollectionCreation") {
                 allowImplicitCollectionCreationField = element;
