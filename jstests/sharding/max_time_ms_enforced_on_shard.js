@@ -33,7 +33,7 @@ assert.commandWorked(sessionColl.insert({_id: 1}));
 
 jsTestLog("Run a separate write.");
 assert.commandFailedWithCode(
-    coll.runCommand({insert: collName, documents: [{_id: 1, nonTxn: 1}], maxTimeMS: 100}),
+    coll.runCommand({insert: collName, documents: [{_id: 1, nonTxn: 1}], maxTimeMS: 1000}),
     ErrorCodes.MaxTimeMSExpired);
 
 jsTestLog("Aborting the transaction.");
