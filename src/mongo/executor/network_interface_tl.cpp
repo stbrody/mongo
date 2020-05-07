@@ -322,7 +322,7 @@ AsyncDBClient* NetworkInterfaceTL::RequestState::getClient(const ConnectionHandl
 }
 
 void NetworkInterfaceTL::CommandStateBase::setTimer() {
-    if (deadline == kNoExpirationDate) {
+    if (deadline == kNoExpirationDate || requestOnAny.disableLocalTimeout) {
         return;
     }
 

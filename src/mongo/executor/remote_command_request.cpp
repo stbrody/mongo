@@ -34,6 +34,7 @@
 #include <fmt/format.h>
 
 #include "mongo/bson/simple_bsonobj_comparator.h"
+#include "mongo/db/operation_context.h"
 #include "mongo/platform/atomic_word.h"
 #include "mongo/util/str.h"
 
@@ -84,7 +85,7 @@ RemoteCommandRequestBase::RemoteCommandRequestBase()
     : id(requestIdCounter.addAndFetch(1)), operationKey(UUID::gen()) {}
 
 void RemoteCommandRequestBase::_updateTimeoutFromOpCtxDeadline(const OperationContext* opCtx) {
-    if (!opCtx || !opCtx->hasDeadline() || opCtx->maxTimeNeverTimeOutFailpointIsActive()) {
+    if (!opCtx || !opCtx->hasDeadline()) {
         return;
     }
 
@@ -92,6 +93,13 @@ void RemoteCommandRequestBase::_updateTimeoutFromOpCtxDeadline(const OperationCo
     if (timeout == kNoTimeout || opCtxTimeout <= timeout) {
         timeout = opCtxTimeout;
         timeoutCode = opCtx->getTimeoutError();
+
+        if (opCtx->maxTimeNeverTimeOutFailpointIsActive()) {
+            // If mongos receives a request with a 'maxTimeMS', but the 'maxTimeNeverTimeOut'
+            // failpoint is enabled, the mongos should still pass the remaining deadline on to the
+            // shard as 'maxTimeMSOpOnly', but shouldn't enforce the deadline locally.
+            disableLocalTimeout = true;
+        }
     }
 }
 

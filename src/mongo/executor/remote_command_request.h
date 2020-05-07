@@ -89,6 +89,10 @@ struct RemoteCommandRequestBase {
 
     FireAndForgetMode fireAndForgetMode;
 
+    // When true, the network interface will refrain from enforcing the 'timeout' for this request,
+    // but will still pass the timeout on as maxTimeMSOpOnly.
+    bool disableLocalTimeout = false;
+
     Milliseconds timeout = kNoTimeout;
     ErrorCodes::Error timeoutCode = ErrorCodes::NetworkInterfaceExceededTimeLimit;
 
