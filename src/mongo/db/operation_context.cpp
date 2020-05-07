@@ -140,6 +140,10 @@ void OperationContext::setDeadlineAfterNowBy(Microseconds maxTime, ErrorCodes::E
     setDeadlineAndMaxTime(when, maxTime, timeoutError);
 }
 
+bool OperationContext::maxTimeNeverTimeOutFailpointIsActive() const {
+    return maxTimeNeverTimeOut.shouldFail();
+}
+
 bool OperationContext::hasDeadlineExpired() const {
     if (!hasDeadline()) {
         return false;
