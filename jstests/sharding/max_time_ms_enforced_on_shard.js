@@ -44,7 +44,7 @@ jsTestLog("Checking document set.");
 // was aborted and the write to insert {_id: 1, nonTxn: 1} failed with a MaxTimeMS error. If
 // the timeout was only enforced on the mongos, however, then the write on the mongod might slip
 // in once the transaction is aborted.
-let docs = sessionColl.find().toArray();
+let docs = coll.find().toArray();
 assert.sameMembers(docs, [{_id: 0}]);
 
 st.stop();
