@@ -3,8 +3,6 @@
 // not just on the mongos.
 //
 
-// todo change this test to set never timeout failpoint on mongos then wait for op to time out on
-// shard
 (function() {
 'use strict';
 

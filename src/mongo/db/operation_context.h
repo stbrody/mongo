@@ -360,6 +360,11 @@ public:
     Milliseconds getRemainingMaxTimeMillis() const;
 
     /**
+     * Returns true if the 'maxTimeNeverTimeOut' failpoint is enabled.
+     */
+    bool maxTimeNeverTimeOutFailpointIsActive() const;
+
+    /**
      * NOTE: This is a legacy "max time" method for controlling operation deadlines and it should
      * not be used in new code. Use getRemainingMaxTimeMillis instead.
      *

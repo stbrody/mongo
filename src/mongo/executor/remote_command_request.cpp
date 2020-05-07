@@ -84,7 +84,7 @@ RemoteCommandRequestBase::RemoteCommandRequestBase()
     : id(requestIdCounter.addAndFetch(1)), operationKey(UUID::gen()) {}
 
 void RemoteCommandRequestBase::_updateTimeoutFromOpCtxDeadline(const OperationContext* opCtx) {
-    if (!opCtx || !opCtx->hasDeadline()) {
+    if (!opCtx || !opCtx->hasDeadline() || opCtx->maxTimeNeverTimeOutFailpointIsActive()) {
         return;
     }
 
