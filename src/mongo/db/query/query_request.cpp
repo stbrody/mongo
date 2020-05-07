@@ -721,15 +721,13 @@ StatusWith<int> QueryRequest::parseMaxTimeMS(BSONElement maxTimeMSElt) {
             (StringBuilder() << maxTimeMSElt.fieldNameStringData() << " must be a number").str());
     }
     long long maxTimeMSLongLong = maxTimeMSElt.safeNumberLong();  // returns 0 on EOO
-    // long long a = INT_MAX;
-    // long long b = LONG_MAX;
-    // long long c = LLONG_MAX; // todo indexer check.
+
     // Give an extra padding for internal clients to handle the case where a mongos is given the
     // max possible value for maxTimeMS, and then passes it on to a shard as maxTimeMSOpOnly, but
     // after adding to it slightly to account for the precision level of the system clock.
     const auto isInternalClient =
         cc().session() && (cc().session()->getTags() & transport::Session::kInternalClient);
-    const long long maxVal = isInternalClient ? static_cast<long long>(INT_MAX) + 1000 : INT_MAX;
+    const long long maxVal = isInternalClient ? static_cast<long long>(INT_MAX) + 100 : INT_MAX;
 
     if (maxTimeMSLongLong < 0 || maxTimeMSLongLong > maxVal) {
         return StatusWith<int>(ErrorCodes::BadValue,
