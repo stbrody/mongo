@@ -206,6 +206,8 @@ TEST(CountCommandTest, ConvertToAggregationWithQueryAndFilterAndLimit) {
 }
 
 TEST(CountCommandTest, ConvertToAggregationWithMaxTimeMS) {
+    setGlobalServiceContext(ServiceContext::make());
+    ThreadClient tc(getGlobalServiceContext());
     auto countCmd = CountCommand::parse(ctxt,
                                         BSON("count"
                                              << "TestColl"
