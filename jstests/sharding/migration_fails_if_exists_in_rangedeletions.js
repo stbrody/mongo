@@ -37,7 +37,7 @@ let st = new ShardingTest({shards: {rs0: {nodes: 3}, rs1: {nodes: 3}}});
         ErrorCodes.MaxTimeMSExpired);
 
     print("######################");
-    printjson(st.shard0.getDB('admin').aggregate([{$currentOp: {localOps: true}}]).toArray());
+    printjson(st.shard0.getDB('admin').aggregate([{$currentOp: {localOps: true, idleSessions:true, allUsers:true}}]).toArray());
 //    assert(false);
     suspendRangeDeletionFailpoint.off();
 
