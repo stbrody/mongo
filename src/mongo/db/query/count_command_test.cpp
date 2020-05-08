@@ -32,6 +32,7 @@
 #include <algorithm>
 
 #include "mongo/bson/json.h"
+#include "mongo/db/client.h"
 #include "mongo/db/pipeline/aggregation_request.h"
 #include "mongo/db/query/count_command_as_aggregation_command.h"
 #include "mongo/db/query/count_command_gen.h"
@@ -65,6 +66,8 @@ TEST(CountCommandTest, ParserDealsWithMissingFieldsCorrectly) {
 }
 
 TEST(CountCommandTest, ParserParsesCommandWithAllFieldsCorrectly) {
+    setGlobalServiceContext(ServiceContext::make());
+    ThreadClient tc(getGlobalServiceContext());
     auto commandObj = BSON("count"
                            << "TestColl"
                            << "$db"
