@@ -37,11 +37,14 @@ let st = new ShardingTest({shards: {rs0: {nodes: 3}, rs1: {nodes: 3}}});
         st.s.adminCommand({moveChunk: ns, find: {x: 50}, to: st.shard0.shardName, maxTimeMS: 5000}),
         ErrorCodes.MaxTimeMSExpired);
 
+    print("######################");
+    printjson(st.shard0.getDB('admin').aggregate([{$currentOp: {localOps: true}}]).toArray());
+//    assert(false);
     suspendRangeDeletionFailpoint.off();
 
     st.s.getCollection(ns).drop();
 })();
-
+//    sleep(5000);
 (() => {
     jsTestLog("Test hashed shard key");
 
