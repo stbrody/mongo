@@ -11,6 +11,19 @@ const dbName = "test";
 const collName = "foo";
 const ns = dbName + "." + collName;
 
+let awaitNoMigration =
+    function(conn) {
+    assert.soon(function() {
+        var ops = conn.getDB('admin')
+                      .aggregate([
+                          {$currentOp: {idleSessions: true, allUsers: true, idleConnections: true}},
+                          {$match: {"desc": 'migrateThread'}}
+                      ])
+                      .toArray();
+        return ops.length == 0;
+    });
+}
+
 // Create 2 shards with 3 replicas each.
 let st = new ShardingTest({shards: {rs0: {nodes: 3}, rs1: {nodes: 3}}});
 
@@ -36,14 +49,16 @@ let st = new ShardingTest({shards: {rs0: {nodes: 3}, rs1: {nodes: 3}}});
         st.s.adminCommand({moveChunk: ns, find: {x: 50}, to: st.shard0.shardName, maxTimeMS: 5000}),
         ErrorCodes.MaxTimeMSExpired);
 
-    print("######################");
-    printjson(st.shard0.getDB('admin').aggregate([{$currentOp: {localOps: true, idleSessions:true, allUsers:true}}]).toArray());
-//    assert(false);
     suspendRangeDeletionFailpoint.off();
+
+    // Due to SERVER-XXXXX, even after receving a MaxTimeMSExpired error, the migration can still be
+    // running on the recipient shard, so we need to wait for it to terminate completely before
+    // trying another migration on the same namespace.
+    awaitNoMigration(st.shard0);
 
     st.s.getCollection(ns).drop();
 })();
-//    sleep(5000);
+
 (() => {
     jsTestLog("Test hashed shard key");
 
