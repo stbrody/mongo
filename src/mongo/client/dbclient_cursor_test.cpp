@@ -847,7 +847,7 @@ TEST_F(DBClientCursorTest, DBClientCursorOplogQuery) {
     //    correctly.
 
     // Set up the DBClientCursor and a mock client connection.
-    ThreadClient tc("DBClientCursorOplogQuery test", getGlobalServiceContext());
+    ThreadClient tc(getGlobalServiceContext());
     DBClientConnectionForTest conn;
     const NamespaceString nss = NamespaceString::kRsOplogNamespace;
     const BSONObj filterObj = BSON("ts" << BSON("$gte" << Timestamp(123, 4)));
