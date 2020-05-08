@@ -769,51 +769,57 @@ void MigrationDestinationManager::cloneCollectionIndexesAndOptions(
 }
 
 void MigrationDestinationManager::_migrateThread() {
-    Client::initKillableThread("migrateThread", getGlobalServiceContext());
-    auto uniqueOpCtx = Client::getCurrent()->makeOperationContext();
-    auto opCtx = uniqueOpCtx.get();
-
-    if (AuthorizationManager::get(opCtx->getServiceContext())->isAuthEnabled()) {
-        AuthorizationSession::get(opCtx->getClient())->grantInternalAuthorization(opCtx);
-    }
-
     try {
-        // The outer OperationContext is used to hold the session checked out for the
-        // duration of the recipient's side of the migration. This guarantees that if the
-        // donor shard has failed over, then the new donor primary cannot bump the
-        // txnNumber on this session while this node is still executing the recipient side
-        //(which is important because otherwise, this node may create orphans after the
-        // range deletion task on this node has been processed).
-        if (_enableResumableRangeDeleter) {
-            opCtx->setLogicalSessionId(_lsid);
-            opCtx->setTxnNumber(_txnNumber);
+        Client::initKillableThread("migrateThread", getGlobalServiceContext());
+        auto uniqueOpCtx = Client::getCurrent()->makeOperationContext();
+        auto opCtx = uniqueOpCtx.get();
 
-            MongoDOperationContextSession sessionTxnState(opCtx);
-
-            auto txnParticipant = TransactionParticipant::get(opCtx);
-            txnParticipant.beginOrContinue(opCtx,
-                                           *opCtx->getTxnNumber(),
-                                           boost::none /* autocommit */,
-                                           boost::none /* startTransaction */);
-            _migrateDriver(opCtx);
-        } else {
-            _migrateDriver(opCtx);
+        if (AuthorizationManager::get(opCtx->getServiceContext())->isAuthEnabled()) {
+            AuthorizationSession::get(opCtx->getClient())->grantInternalAuthorization(opCtx);
         }
+
+        try {
+            // The outer OperationContext is used to hold the session checked out for the
+            // duration of the recipient's side of the migration. This guarantees that if the
+            // donor shard has failed over, then the new donor primary cannot bump the
+            // txnNumber on this session while this node is still executing the recipient side
+            //(which is important because otherwise, this node may create orphans after the
+            // range deletion task on this node has been processed).
+            if (_enableResumableRangeDeleter) {
+                opCtx->setLogicalSessionId(_lsid);
+                opCtx->setTxnNumber(_txnNumber);
+
+                MongoDOperationContextSession sessionTxnState(opCtx);
+
+                auto txnParticipant = TransactionParticipant::get(opCtx);
+                txnParticipant.beginOrContinue(opCtx,
+                                               *opCtx->getTxnNumber(),
+                                               boost::none /* autocommit */,
+                                               boost::none /* startTransaction */);
+                _migrateDriver(opCtx);
+            } else {
+                _migrateDriver(opCtx);
+            }
+        } catch (...) {
+            _setStateFail(str::stream() << "migrate failed: " << redact(exceptionToStatus()));
+        }
+
+        if (!_enableResumableRangeDeleter) {
+            if (getState() != DONE) {
+                _forgetPending(opCtx, ChunkRange(_min, _max));
+            }
+        }
+
+        stdx::lock_guard<Latch> lk(_mutex);
+        _sessionId.reset();
+        _collUuid.reset();
+        _scopedReceiveChunk.reset();
+        _isActiveCV.notify_all();
+    } catch (const DBException& e) {
+        logd("@@@@@@@@@@ UNCAUGHT EXCEPTION IN _migrateThread: {}", e);
     } catch (...) {
-        _setStateFail(str::stream() << "migrate failed: " << redact(exceptionToStatus()));
+        logd("@@@@@@@@@@ UNCAUGHT EXCEPTION IN _migrateThread!!!!!!!");
     }
-
-    if (!_enableResumableRangeDeleter) {
-        if (getState() != DONE) {
-            _forgetPending(opCtx, ChunkRange(_min, _max));
-        }
-    }
-
-    stdx::lock_guard<Latch> lk(_mutex);
-    _sessionId.reset();
-    _collUuid.reset();
-    _scopedReceiveChunk.reset();
-    _isActiveCV.notify_all();
 }
 
 void MigrationDestinationManager::_migrateDriver(OperationContext* outerOpCtx) {
@@ -893,6 +899,7 @@ void MigrationDestinationManager::_migrateDriver(OperationContext* outerOpCtx) {
             recipientDeletionTask.setPending(true);
 
             migrationutil::persistRangeDeletionTaskLocally(outerOpCtx, recipientDeletionTask);
+            // sleepmillis(10000);
         } else {
             // Synchronously delete any data which might have been left orphaned in the range
             // being moved, and wait for completion
