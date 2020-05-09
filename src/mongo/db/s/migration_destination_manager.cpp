@@ -816,7 +816,7 @@ void MigrationDestinationManager::_migrateThread() {
         _scopedReceiveChunk.reset();
         _isActiveCV.notify_all();
     } catch (const DBException& e) {
-        logd("@@@@@@@@@@ UNCAUGHT EXCEPTION IN _migrateThread: {}", e);
+        logd("@@@@@@@@@@ UNCAUGHT EXCEPTION IN _migrateThread: {}", e.toString());
     } catch (...) {
         logd("@@@@@@@@@@ UNCAUGHT EXCEPTION IN _migrateThread!!!!!!!");
     }
