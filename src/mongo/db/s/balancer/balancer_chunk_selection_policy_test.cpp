@@ -138,6 +138,7 @@ TEST_F(BalancerChunkSelectionTest, TagRangesOverlap) {
         setUpTags(kNamespace, tagChunkRanges);
 
         auto future = launchAsync([this, &chunk] {
+            ThreadClient tc(getGlobalServiceContext());
             // Requesting chunks to be relocated requires running commands on each shard to get
             // shard statistics. Set up dummy hosts for the source shards.
             shardTargeterMock(operationContext(), kShardId0)->setFindHostReturnValue(kShardHost0);
@@ -191,6 +192,7 @@ TEST_F(BalancerChunkSelectionTest, TagRangeMaxNotAlignedWithChunkMax) {
         }
 
         auto future = launchAsync([this] {
+            ThreadClient tc(getGlobalServiceContext());
             // Requests chunks to be relocated requires running commands on each shard to
             // get shard statistics. Set up dummy hosts for the source shards.
             shardTargeterMock(operationContext(), kShardId0)->setFindHostReturnValue(kShardHost0);
