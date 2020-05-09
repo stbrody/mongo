@@ -83,6 +83,9 @@ let st = new ShardingTest({shards: {rs0: {nodes: 3}, rs1: {nodes: 3}}});
 
     suspendRangeDeletionFailpoint.off();
 
+    // SERVER-XXXXX
+    awaitNoMigration(st.shard0);
+
     st.s.getCollection(ns).drop();
 })();
 
