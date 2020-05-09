@@ -107,7 +107,7 @@ void ClusterCommandTestFixture::expectReturnsError(ErrorCodes::Error code) {
 
 DbResponse ClusterCommandTestFixture::runCommand(BSONObj cmd) {
     // Create a new client/operation context per command
-    auto client = getServiceContext()->makeClient("ClusterCmdClient");
+    ThreadClient client("ClusterCmdClient", getServiceContext());
     auto opCtx = client->makeOperationContext();
 
     const auto opMsgRequest = OpMsgRequest::fromDBAndBody(kNss.db(), cmd);
