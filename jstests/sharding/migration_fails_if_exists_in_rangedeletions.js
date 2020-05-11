@@ -12,8 +12,7 @@ const dbName = "test";
 const collName = "foo";
 const ns = dbName + "." + collName;
 
-let awaitNoMigration =
-    function(conn) {
+let awaitNoMigration = function(conn) {
     assert.soon(function() {
         var ops = conn.getDB('admin')
                       .aggregate([
@@ -23,7 +22,7 @@ let awaitNoMigration =
                       .toArray();
         return ops.length == 0;
     });
-}
+};
 
 // Create 2 shards with 3 replicas each.
 let st = new ShardingTest({shards: {rs0: {nodes: 3}, rs1: {nodes: 3}}});
