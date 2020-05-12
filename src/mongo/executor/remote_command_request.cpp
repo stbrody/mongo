@@ -34,6 +34,7 @@
 #include <fmt/format.h>
 
 #include "mongo/bson/simple_bsonobj_comparator.h"
+#include "mongo/db/operation_context.h"
 #include "mongo/platform/atomic_word.h"
 #include "mongo/util/str.h"
 
@@ -64,7 +65,8 @@ RemoteCommandRequestBase::RemoteCommandRequestBase(RequestId requestId,
       metadata(metadataObj),
       opCtx(opCtx),
       hedgeOptions(hedgeOptions),
-      fireAndForgetMode(fireAndForgetMode) {
+      fireAndForgetMode(fireAndForgetMode),
+      timeout(timeoutMillis) {
     // If there is a comment associated with the current operation, append it to the command that we
     // are about to dispatch to the shards.
     cmdObj = opCtx && opCtx->getComment() && !theCmdObj["comment"]
@@ -76,12 +78,31 @@ RemoteCommandRequestBase::RemoteCommandRequestBase(RequestId requestId,
         cmdObj = cmdObj.addField(BSON("clientOperationKey" << operationKey.get()).firstElement());
     }
 
-    timeout = opCtx ? std::min<Milliseconds>(opCtx->getRemainingMaxTimeMillis(), timeoutMillis)
-                    : timeoutMillis;
+    _updateTimeoutFromOpCtxDeadline(opCtx);
 }
 
 RemoteCommandRequestBase::RemoteCommandRequestBase()
     : id(requestIdCounter.addAndFetch(1)), operationKey(UUID::gen()) {}
+
+void RemoteCommandRequestBase::_updateTimeoutFromOpCtxDeadline(const OperationContext* opCtx) {
+    if (!opCtx || !opCtx->hasDeadline()) {
+        return;
+    }
+
+    const auto opCtxTimeout = opCtx->getRemainingMaxTimeMillis();
+    if (timeout == kNoTimeout || opCtxTimeout <= timeout) {
+        timeout = opCtxTimeout;
+        timeoutCode = opCtx->getTimeoutError();
+
+        if (opCtx->maxTimeNeverTimeOutFailpointIsActive()) {
+            // If a mongod or mongos receives a request with a 'maxTimeMS', but the
+            // 'maxTimeNeverTimeOut' failpoint is enabled, that server process should not enforce
+            // the deadline locally, but should still pass the remaining deadline on to any other
+            // servers it contacts as 'maxTimeMSOpOnly'.
+            disableLocalTimeout = true;
+        }
+    }
+}
 
 template <typename T>
 RemoteCommandRequestImpl<T>::RemoteCommandRequestImpl() = default;

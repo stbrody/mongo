@@ -67,6 +67,8 @@ public:
     constexpr static Milliseconds kTimeout{5000};
 
     void setUp() override {
+        WireSpec::instance().isInternalClient = true;
+
         net = makeNetworkInterface("ReplicaSetMonintorTest");
 
         auto tp = std::make_unique<NetworkInterfaceThreadPool>(net.get());
@@ -77,8 +79,6 @@ public:
 
         replSetUri = uassertStatusOK(MongoURI::parse(getReplSetConnectionString()));
         numNodes = replSetUri.getServers().size();
-
-        WireSpec::instance().isInternalClient = true;
     };
 
     void tearDown() override {

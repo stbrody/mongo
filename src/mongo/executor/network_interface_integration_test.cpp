@@ -545,7 +545,7 @@ TEST_F(NetworkInterfaceTest, AsyncOpTimeoutWithOpCtxDeadlineSooner) {
         return;
     }
 
-    ASSERT_EQ(ErrorCodes::NetworkInterfaceExceededTimeLimit, result.status);
+    ASSERT_EQ(ErrorCodes::ExceededTimeLimit, result.status);
     ASSERT(result.elapsedMillis);
     // check that the request timeout uses the smaller of the operation context deadline and
     // the timeout specified in the request constructor.
