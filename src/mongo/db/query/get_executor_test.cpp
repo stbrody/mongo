@@ -220,6 +220,8 @@ TEST(GetExecutorTest, GetAllowedIndicesMatchesMultipleIndexesByKey) {
 }
 
 TEST(GetExecutorTest, GetAllowedWildcardIndicesByKey) {
+    ON_BLOCK_EXIT([] { setGlobalServiceContext(nullptr); });
+    setGlobalServiceContext(ServiceContext::make());
     auto wcProj = createProjectionExecutor(
         fromjson("{_id: 0}"),
         {ProjectionPolicies::DefaultIdPolicy::kExcludeId,
