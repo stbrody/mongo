@@ -54,7 +54,7 @@ public:
 
 private:
     ServiceContext::UniqueServiceContext _service;
-    ServiceContext::UniqueClient _client;
+    ThreadClient _client;
 };
 
 }  // namespace mongo
