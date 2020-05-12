@@ -31,6 +31,7 @@
 
 #include <string>
 
+#include "mongo/db/client.h"
 #include "mongo/db/jsobj.h"
 #include "mongo/db/query/getmore_request.h"
 #include "mongo/db/repl/optime.h"
@@ -177,6 +178,10 @@ TEST(GetMoreRequestTest, parseFromBSONIgnoreQueryOptions) {
 }
 
 TEST(GetMoreRequestTest, parseFromBSONHasMaxTimeMS) {
+    ON_BLOCK_EXIT([] { setGlobalServiceContext(nullptr); });
+    setGlobalServiceContext(ServiceContext::make());
+    ThreadClient tc(getGlobalServiceContext());
+
     StatusWith<GetMoreRequest> result =
         GetMoreRequest::parseFromBSON("db",
                                       BSON("getMore" << CursorId(123) << "collection"
@@ -190,6 +195,10 @@ TEST(GetMoreRequestTest, parseFromBSONHasMaxTimeMS) {
 }
 
 TEST(GetMoreRequestTest, parseFromBSONHasMaxTimeMSOfZero) {
+    ON_BLOCK_EXIT([] { setGlobalServiceContext(nullptr); });
+    setGlobalServiceContext(ServiceContext::make());
+    ThreadClient tc(getGlobalServiceContext());
+
     StatusWith<GetMoreRequest> result =
         GetMoreRequest::parseFromBSON("db",
                                       BSON("getMore" << CursorId(123) << "collection"

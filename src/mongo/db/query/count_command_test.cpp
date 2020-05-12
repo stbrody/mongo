@@ -66,6 +66,7 @@ TEST(CountCommandTest, ParserDealsWithMissingFieldsCorrectly) {
 }
 
 TEST(CountCommandTest, ParserParsesCommandWithAllFieldsCorrectly) {
+    ON_BLOCK_EXIT([] { setGlobalServiceContext(nullptr); });
     setGlobalServiceContext(ServiceContext::make());
     ThreadClient tc(getGlobalServiceContext());
     auto commandObj = BSON("count"
@@ -206,6 +207,7 @@ TEST(CountCommandTest, ConvertToAggregationWithQueryAndFilterAndLimit) {
 }
 
 TEST(CountCommandTest, ConvertToAggregationWithMaxTimeMS) {
+    ON_BLOCK_EXIT([] { setGlobalServiceContext(nullptr); });
     setGlobalServiceContext(ServiceContext::make());
     ThreadClient tc(getGlobalServiceContext());
     auto countCmd = CountCommand::parse(ctxt,

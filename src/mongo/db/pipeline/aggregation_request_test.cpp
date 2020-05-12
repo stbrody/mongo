@@ -55,8 +55,10 @@ const Document kDefaultCursorOptionDocument{
 //
 
 TEST(AggregationRequestTest, ShouldParseAllKnownOptions) {
+    ON_BLOCK_EXIT([] { setGlobalServiceContext(nullptr); });
     setGlobalServiceContext(ServiceContext::make());
     ThreadClient tc(getGlobalServiceContext());
+
     NamespaceString nss("a.collection");
     const BSONObj inputBson = fromjson(
         "{pipeline: [{$match: {a: 'abc'}}], explain: false, allowDiskUse: true, fromMongos: true, "
