@@ -221,6 +221,16 @@ public:
                                                            const BSONObj& startKey,
                                                            BoundInclusion boundInclusion,
                                                            std::size_t limit) = 0;
+    StatusWith<std::vector<BSONObj>> findAllDocuments(OperationContext* opCtx,
+                                                      const NamespaceString& nss) {
+        return findDocuments(opCtx,
+                             nss,
+                             boost::none,
+                             ScanDirection::kForward,
+                             BSONObj(),
+                             BoundInclusion::kExcludeBothStartAndEndKeys,
+                             1000);  // todo make this actually infinity
+    }
 
     /**
      * Deletes at most "limit" documents returned by a collection or index scan on the collection in

@@ -34,6 +34,7 @@
 #include "mongo/base/init.h"
 #include "mongo/bson/bsonobj.h"
 #include "mongo/db/namespace_string.h"
+#include "mongo/db/repl/storage_interface.h"
 #include "mongo/db/repl/test_type_gen.h"
 #include "mongo/executor/task_executor.h"
 
@@ -49,34 +50,73 @@ MONGO_INITIALIZER(RegisterPrimaryOnlyServices)(InitializerContext*) {
     return Status::OK();
 }
 
-class PrimaryOnlyServiceGroup;
-
-class PrimaryOnlyServiceRegistry {
-public:
-    void onStepUp(long long term) {
-        // iterate over service groups, start them up.
-    }
-
-    void registerServiceGroup() {}
-
-private:
-    std::vector<PrimaryOnlyServiceGroup> _services;
-};
-
 class PrimaryOnlyServiceGroup {
 public:
-    explicit PrimaryOnlyServiceGroup(executor::TaskExecutor* executor, NamespaceString ns)
-        : _executor(executor), _ns(ns){};
+    explicit PrimaryOnlyServiceGroup(executor::TaskExecutor* executor) : _executor(executor) {}
+    virtual ~PrimaryOnlyServiceGroup() = default;
 
-    void startup(BSONObj bson) {
+    void startup(long long term) {
+        auto res = _executor->scheduleWork(
+            [this, term](const mongo::executor::TaskExecutor::CallbackArgs& args) {
+                uassertStatusOK(args.status);  // todo is throwing like this safe?
+                _startup(args.opCtx, term);
+            });
+        auto handle = uassertStatusOK(res);  // throw away handle, not needed.
+    }
+
+    /**
+     * Returns the namespace where this service group keeps the documents containing the state for
+     * its individual service instances.
+     */
+    virtual NamespaceString getNamespace() const = 0;
+
+private:
+    void _startup(OperationContext* opCtx, long long term) {
+        auto storage = StorageInterface::get(opCtx);
+        const auto docs = uassertStatusOK(
+            storage->findAllDocuments(opCtx, getNamespace()));  // todo safe to throw?
+    }
+
+protected:
+    executor::TaskExecutor* _executor;  // todo: who owns this?
+};
+
+class TestService : public PrimaryOnlyServiceGroup {
+public:
+    TestService(executor::TaskExecutor* executor, NamespaceString ns)
+        : PrimaryOnlyServiceGroup(executor), _ns(ns){};
+
+    // TODO can we move all namespace consideration to the parent class?
+    NamespaceString getNamespace() const final {
+        return _ns;
+    }
+
+    void test(BSONObj bson) {
         auto test = TestStruct::parse(IDLParserErrorContext("parsing test type"), bson);
     }
 
 private:
-    executor::TaskExecutor* _executor;  // todo: who owns this?
-
     // Namespace where docs containing state about instances of this service group are stored.
     NamespaceString _ns;
+};
+
+class PrimaryOnlyServiceRegistry {
+public:
+    /**
+     * Iterates over all registered services and starts them up.
+     */
+    void onStepUp(long long term) {
+        for (auto& service : _services) {
+            service->startup(term);
+        }
+    }
+
+    void registerServiceGroup(std::unique_ptr<PrimaryOnlyServiceGroup> service) {
+        _services.push_back(std::move(service));
+    }
+
+private:
+    std::vector<std::unique_ptr<PrimaryOnlyServiceGroup>> _services;
 };
 
 }  // namespace repl
