@@ -1478,3 +1478,13 @@ env.Library(
         '$BUILD_DIR/mongo/db/commands/authentication_commands',
     ],
 )
+
+env.Library(
+    target='primary_only_service',
+    source=[
+        'primary_only_service.cpp',
+    ],
+    LIBDEPS=[
+        '$BUILD_DIR/mongo/base',
+    ],
+)
