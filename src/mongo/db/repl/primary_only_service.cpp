@@ -31,9 +31,53 @@
 
 #include "mongo/platform/basic.h"
 
+#include "mongo/base/init.h"
+#include "mongo/bson/bsonobj.h"
+#include "mongo/db/namespace_string.h"
+#include "mongo/db/repl/test_type_gen.h"
+#include "mongo/executor/task_executor.h"
+
+
+#include <vector>
+
 //#include "mongo/db/repl/primary_aware_service.h"
 
 namespace mongo {
+namespace repl {
+MONGO_INITIALIZER(RegisterPrimaryOnlyServices)(InitializerContext*) {
+    // TODO Try registering an example service
+    return Status::OK();
+}
 
-class PrimaryOnlyServiceRegistry {};
+class PrimaryOnlyServiceGroup;
+
+class PrimaryOnlyServiceRegistry {
+public:
+    void onStepUp(long long term) {
+        // iterate over service groups, start them up.
+    }
+
+    void registerServiceGroup() {}
+
+private:
+    std::vector<PrimaryOnlyServiceGroup> _services;
+};
+
+class PrimaryOnlyServiceGroup {
+public:
+    explicit PrimaryOnlyServiceGroup(executor::TaskExecutor* executor, NamespaceString ns)
+        : _executor(executor), _ns(ns){};
+
+    void startup(BSONObj bson) {
+        auto test = TestStruct::parse(IDLParserErrorContext("parsing test type"), bson);
+    }
+
+private:
+    executor::TaskExecutor* _executor;  // todo: who owns this?
+
+    // Namespace where docs containing state about instances of this service group are stored.
+    NamespaceString _ns;
+};
+
+}  // namespace repl
 }  // namespace mongo
