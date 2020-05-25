@@ -82,10 +82,17 @@ public:
 };
 
 class PrimaryOnlyServiceGroup {
+private:
+    using ConstructInstanceFn =
+        std::function<std::unique_ptr<PrimaryOnlyServiceInstance>(long long)>;
+
 public:
-    PrimaryOnlyServiceGroup(executor::TaskExecutor* executor, NamespaceString ns)
-        : _executor(executor), _ns(ns) {}
+    PrimaryOnlyServiceGroup(executor::TaskExecutor* executor,
+                            NamespaceString ns,
+                            ConstructInstanceFn constructInstanceFn)
+        : _executor(executor), _ns(ns), _constructInstanceFn(constructInstanceFn) {}
     virtual ~PrimaryOnlyServiceGroup() = default;
+    // todo make PrimaryOnlyServiceGroup move-only
 
     void startup(long long term) {
         auto res = _executor->scheduleWork(
@@ -96,35 +103,28 @@ public:
         auto handle = uassertStatusOK(res);  // throw away handle, not needed.
     }
 
-    /**
-     * Returns the namespace where this service group keeps the documents containing the state for
-     * its individual service instances.
-     */
-    NamespaceString getNamespace() const {
-        return _ns;
-    }
-
 private:
     void _startup(OperationContext* opCtx, long long term) {
         auto storage = StorageInterface::get(opCtx);
-        const auto docs = uassertStatusOK(
-            storage->findAllDocuments(opCtx, getNamespace()));  // todo safe to throw/uassert?
+        const auto docs =
+            uassertStatusOK(storage->findAllDocuments(opCtx, _ns));  // todo safe to throw/uassert?
         for (const auto& doc : docs) {
             std::cout << doc.toString() << std::endl;
 
-            //_instances.emplace_back(term);
-            //_instances.back().startup(doc);
+            _instances.push_back(_constructInstanceFn(term));
+            uassertStatusOK(_instances.back()->startup(doc));
             // todo start scheduling tests to call 'runOnce' on instances.
         }
     }
 
-protected:
     executor::TaskExecutor* _executor;  // todo: who owns this?
 
-    // Namespace where docs containing state about instances of this service group are stored.
+    // Namespace where docs containing state for instances of this service group are stored.
     const NamespaceString _ns;
 
-    std::vector<PrimaryOnlyServiceInstance> _instances;
+    const ConstructInstanceFn _constructInstanceFn;
+
+    std::vector<std::unique_ptr<PrimaryOnlyServiceInstance>> _instances;
 };
 
 class PrimaryOnlyServiceRegistry {
@@ -150,7 +150,12 @@ private:
 MONGO_INITIALIZER(RegisterPrimaryOnlyServices)(InitializerContext*) {
     PrimaryOnlyServiceRegistry registry;  // really this'll be a service context decoration
 
-    PrimaryOnlyServiceGroup instance(nullptr, NamespaceString("admin.myservice"));
+    auto group = std::make_unique<PrimaryOnlyServiceGroup>(
+        nullptr, NamespaceString("admin.myservice"), [](long long term) {
+            return std::make_unique<TestService>(term);
+        });
+
+    registry.registerServiceGroup(std::move(group));
     return Status::OK();
 }
 
