@@ -34,11 +34,20 @@ global:
 imports:
     - "mongo/idl/basic_types.idl"
 
+enums:
+    TestServiceState:
+        description: "State of the service"
+        type: string
+        values:
+            kStateFoo: "foo"
+            kStateBar: "bar"
+            kStateBaz: "baz"
+
 structs:
     TestStruct:
         description: "test"
         fields:
-            foo:
-                cpp_name: foo
-                type: string
+            myState:
+                cpp_name: myState
+                type: TestServiceState
                 description: "blah"

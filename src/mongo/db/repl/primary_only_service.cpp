@@ -34,25 +34,57 @@
 #include "mongo/base/init.h"
 #include "mongo/bson/bsonobj.h"
 #include "mongo/db/namespace_string.h"
+#include "mongo/db/repl/optime.h"
 #include "mongo/db/repl/storage_interface.h"
 #include "mongo/db/repl/test_type_gen.h"
 #include "mongo/executor/task_executor.h"
 
-
+#include <memory>
 #include <vector>
 
 //#include "mongo/db/repl/primary_aware_service.h"
 
 namespace mongo {
 namespace repl {
-MONGO_INITIALIZER(RegisterPrimaryOnlyServices)(InitializerContext*) {
-    // TODO Try registering an example service
-    return Status::OK();
-}
+
+class PrimaryOnlyServiceInstance {
+public:
+    explicit PrimaryOnlyServiceInstance(long long term) : _term(term) {}
+    virtual ~PrimaryOnlyServiceInstance() = default;
+
+    /**
+     * Initialize any needed initial state based on the state document provided.
+     */
+    virtual Status startup(BSONObj state) = 0;
+
+    /**
+     * The XXXXX mechanism will call this repeatedly as long as this node remains primary in _term.
+     */
+    virtual StatusWith<OpTime> runOnce(OperationContext* opCtx) = 0;
+
+protected:
+    const long long _term;
+};
+
+class TestService : public PrimaryOnlyServiceInstance {
+public:
+    explicit TestService(long long term) : PrimaryOnlyServiceInstance(term) {}
+    virtual ~TestService() = default;
+
+    Status startup(BSONObj state) final {
+        return Status::OK();
+    }
+
+    StatusWith<OpTime> runOnce(OperationContext* opCtx) final {
+        OpTime ot;
+        return ot;
+    }
+};
 
 class PrimaryOnlyServiceGroup {
 public:
-    explicit PrimaryOnlyServiceGroup(executor::TaskExecutor* executor) : _executor(executor) {}
+    PrimaryOnlyServiceGroup(executor::TaskExecutor* executor, NamespaceString ns)
+        : _executor(executor), _ns(ns) {}
     virtual ~PrimaryOnlyServiceGroup() = default;
 
     void startup(long long term) {
@@ -68,40 +100,58 @@ public:
      * Returns the namespace where this service group keeps the documents containing the state for
      * its individual service instances.
      */
-    virtual NamespaceString getNamespace() const = 0;
+    NamespaceString getNamespace() const {
+        return _ns;
+    }
 
 private:
     void _startup(OperationContext* opCtx, long long term) {
         auto storage = StorageInterface::get(opCtx);
         const auto docs = uassertStatusOK(
-            storage->findAllDocuments(opCtx, getNamespace()));  // todo safe to throw?
+            storage->findAllDocuments(opCtx, getNamespace()));  // todo safe to throw/uassert?
+        for (const auto& doc : docs) {
+            std::cout << doc.toString() << std::endl;
+
+            //_instances.emplace_back(term);
+            //_instances.back().startup(doc);
+            // todo start scheduling tests to call 'runOnce' on instances.
+        }
     }
 
 protected:
     executor::TaskExecutor* _executor;  // todo: who owns this?
-};
 
-class TestService : public PrimaryOnlyServiceGroup {
-public:
-    TestService(executor::TaskExecutor* executor, NamespaceString ns)
-        : PrimaryOnlyServiceGroup(executor), _ns(ns){};
-
-    // TODO can we move all namespace consideration to the parent class?
-    NamespaceString getNamespace() const final {
-        return _ns;
-    }
-
-    void test(BSONObj bson) {
-        auto test = TestStruct::parse(IDLParserErrorContext("parsing test type"), bson);
-    }
-
-private:
     // Namespace where docs containing state about instances of this service group are stored.
-    NamespaceString _ns;
+    const NamespaceString _ns;
+
+    std::vector<PrimaryOnlyServiceInstance> _instances;
 };
+
+// class TestServiceGroup : public PrimaryOnlyServiceGroup {
+// public:
+//    TestServiceGroup(executor::TaskExecutor* executor, NamespaceString ns)
+//        : PrimaryOnlyServiceGroup(executor), _ns(ns){};
+//
+//    // TODO can we move all namespace consideration to the parent class?
+//    NamespaceString getNamespace() const final {
+//        return _ns;
+//    }
+//
+//    void test(BSONObj bson) {
+//        auto test = TestStruct::parse(IDLParserErrorContext("parsing test type"), bson);
+//        if (test.getMyState() == TestServiceStateEnum::kStateFoo) {
+//            std::cout << "in state foo" << std::endl;
+//        }
+//    }
+//
+// private:
+//    // Namespace where docs containing state about instances of this service group are stored.
+//    NamespaceString _ns;
+//};
 
 class PrimaryOnlyServiceRegistry {
 public:
+    PrimaryOnlyServiceRegistry() {}
     /**
      * Iterates over all registered services and starts them up.
      */
@@ -118,6 +168,13 @@ public:
 private:
     std::vector<std::unique_ptr<PrimaryOnlyServiceGroup>> _services;
 };
+
+MONGO_INITIALIZER(RegisterPrimaryOnlyServices)(InitializerContext*) {
+    PrimaryOnlyServiceRegistry registry;  // really this'll be a service context decoration
+
+    PrimaryOnlyServiceGroup instance(nullptr, NamespaceString("admin.myservice"));
+    return Status::OK();
+}
 
 }  // namespace repl
 }  // namespace mongo

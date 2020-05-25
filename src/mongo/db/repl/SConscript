@@ -1491,3 +1491,14 @@ env.Library(
         'storage_interface',
     ],
 )
+
+env.CppUnitTest(
+    target='primary_only_service_test',
+    source=[
+        'primary_only_service_test.cpp',
+    ],
+    LIBDEPS=[
+        'primary_only_service',
+    ]
+)
+
