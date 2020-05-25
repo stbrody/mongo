@@ -127,28 +127,6 @@ protected:
     std::vector<PrimaryOnlyServiceInstance> _instances;
 };
 
-// class TestServiceGroup : public PrimaryOnlyServiceGroup {
-// public:
-//    TestServiceGroup(executor::TaskExecutor* executor, NamespaceString ns)
-//        : PrimaryOnlyServiceGroup(executor), _ns(ns){};
-//
-//    // TODO can we move all namespace consideration to the parent class?
-//    NamespaceString getNamespace() const final {
-//        return _ns;
-//    }
-//
-//    void test(BSONObj bson) {
-//        auto test = TestStruct::parse(IDLParserErrorContext("parsing test type"), bson);
-//        if (test.getMyState() == TestServiceStateEnum::kStateFoo) {
-//            std::cout << "in state foo" << std::endl;
-//        }
-//    }
-//
-// private:
-//    // Namespace where docs containing state about instances of this service group are stored.
-//    NamespaceString _ns;
-//};
-
 class PrimaryOnlyServiceRegistry {
 public:
     PrimaryOnlyServiceRegistry() {}
