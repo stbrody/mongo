@@ -35,6 +35,7 @@
 #include "mongo/bson/bsonobj.h"
 #include "mongo/db/namespace_string.h"
 #include "mongo/db/repl/optime.h"
+#include "mongo/db/repl/repl_client_info.h"
 #include "mongo/db/repl/storage_interface.h"
 #include "mongo/db/repl/test_type_gen.h"
 #include "mongo/executor/task_executor.h"
@@ -54,13 +55,20 @@ public:
 
     /**
      * Initialize any needed initial state based on the state document provided.
+     * Must not block.
+     * Throws on error.
      */
-    virtual Status startup(BSONObj state) = 0;
+    virtual void startup(BSONObj state) = 0;
 
     /**
      * The XXXXX mechanism will call this repeatedly as long as this node remains primary in _term.
+     * Can block and do disk AND network i/o.
+     * Is responsible for persisting any state needed so that its work can be resumed if it is
+     * killed and restarted as a new instance.  Returns the OpTime that must be visible for
+     * subsequent calls to startup with a 'state' object read at that optime to resume this work.
+     * Throws on error.
      */
-    virtual StatusWith<OpTime> runOnce(OperationContext* opCtx) = 0;
+    virtual OpTime runOnce(OperationContext* opCtx) = 0;
 
 protected:
     const long long _term;
@@ -71,14 +79,39 @@ public:
     explicit TestService(long long term) : PrimaryOnlyServiceInstance(term) {}
     virtual ~TestService() = default;
 
-    Status startup(BSONObj state) final {
-        return Status::OK();
+    void startup(BSONObj state) final {
+        myStateStruct = TestStruct::parse(IDLParserErrorContext("parsing test type"), state);
     }
 
-    StatusWith<OpTime> runOnce(OperationContext* opCtx) final {
-        OpTime ot;
-        return ot;
+    OpTime runOnce(OperationContext* opCtx) final {
+        auto storage = StorageInterface::get(opCtx);
+
+        auto newState = myStateStruct.getMyState();
+        switch (myStateStruct.getMyState()) {
+            case TestServiceStateEnum::kStateFoo:
+                newState = TestServiceStateEnum::kStateBar;
+                break;
+            case TestServiceStateEnum::kStateBar:
+                newState = TestServiceStateEnum::kStateBaz;
+                break;
+            case TestServiceStateEnum::kStateBaz:
+                newState = TestServiceStateEnum::kStateFoo;
+                break;
+        }
+        myStateStruct.setMyState(newState);
+
+        BSONObj stateObj = myStateStruct.toBSON();
+        TimestampedBSONObj update;
+        update.obj = stateObj;
+
+        uassertStatusOK(storage->updateSingleton(
+            opCtx, NamespaceString("admin.myservice"), stateObj.getField("_id").wrap(), update));
+
+        return ReplClientInfo::forClient(opCtx->getClient()).getLastOp();
     }
+
+private:
+    TestStruct myStateStruct;
 };
 
 class PrimaryOnlyServiceGroup {
@@ -92,7 +125,6 @@ public:
                             ConstructInstanceFn constructInstanceFn)
         : _executor(executor), _ns(ns), _constructInstanceFn(constructInstanceFn) {}
     virtual ~PrimaryOnlyServiceGroup() = default;
-    // todo make PrimaryOnlyServiceGroup move-only
 
     void startup(long long term) {
         auto res = _executor->scheduleWork(
@@ -112,7 +144,7 @@ private:
             std::cout << doc.toString() << std::endl;
 
             _instances.push_back(_constructInstanceFn(term));
-            uassertStatusOK(_instances.back()->startup(doc));
+            _instances.back()->startup(doc);
             // todo start scheduling tests to call 'runOnce' on instances.
         }
     }
