@@ -145,7 +145,7 @@ private:
 
             _instances.push_back(_constructInstanceFn(term));
             _instances.back()->startup(doc);
-            // todo start scheduling tests to call 'runOnce' on instances.
+            // todo start scheduling tasks to call 'runOnce' on instances.
         }
     }
 
