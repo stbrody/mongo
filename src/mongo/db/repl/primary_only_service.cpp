@@ -120,23 +120,34 @@ private:
 
 class PrimaryOnlyServiceGroup {
 private:
+    using ConstructExecutorFn = std::function<std::unique_ptr<executor::TaskExecutor>()>;
     using ConstructInstanceFn =
         std::function<std::shared_ptr<PrimaryOnlyServiceInstance>(long long)>;
 
 public:
-    PrimaryOnlyServiceGroup(executor::TaskExecutor* executor,
-                            NamespaceString ns,
-                            ConstructInstanceFn constructInstanceFn)
-        : _executor(executor), _ns(ns), _constructInstanceFn(constructInstanceFn) {}
+    PrimaryOnlyServiceGroup(NamespaceString ns,
+                            ConstructInstanceFn constructInstanceFn,
+                            ConstructExecutorFn constructExecutorFn)
+        : _ns(ns),
+          _constructInstanceFn(constructInstanceFn),
+          _constructExecutorFn(constructExecutorFn) {}
     virtual ~PrimaryOnlyServiceGroup() = default;
 
     void startup(long long term) {
+        _executor = _constructExecutorFn();
+        _executor->startup();
+
         auto res = _executor->scheduleWork(
             [this, term](const mongo::executor::TaskExecutor::CallbackArgs& args) {
-                uassertStatusOK(args.status);  // todo is throwing like this safe?
+                uassertStatusOK(args.status);  // todo error handling
                 _startup(args.opCtx, term);
             });
         auto handle = uassertStatusOK(res);  // throw away handle, not needed.
+    }
+
+    void shutdown() {
+        _executor->shutdown();
+        _executor.reset();
     }
 
 private:
@@ -149,16 +160,34 @@ private:
 
             _instances.push_back(_constructInstanceFn(term));
             _instances.back()->initialize(doc);
-            // todo start scheduling tasks to call 'runOnce' on instances.
+
+            // start scheduling tasks to repeatedly call 'runOnce' on instances.
+            auto res = _executor->scheduleWork(
+                [instance =
+                     _instances.back()](const mongo::executor::TaskExecutor::CallbackArgs& args) {
+                    uassertStatusOK(args.status);  // todo error handling
+                });
+            auto handle =
+                uassertStatusOK(res);  // throw away handle, not needed. TODO error handling.
         }
     }
 
-    executor::TaskExecutor* _executor;  // todo: who owns this?
+    void _taskInstanceRunner(OperationContext* opCtx,
+                             std::shared_ptr<PrimaryOnlyServiceInstance> instance) {
+        OpTime ot = instance->runOnce(opCtx);
+        std::cout << ot.toString();
+    }
 
     // Namespace where docs containing state for instances of this service group are stored.
     const NamespaceString _ns;
 
+    // Function for constructing new instances of this ServiceGroup.
     const ConstructInstanceFn _constructInstanceFn;
+
+    // Function for constructing new a TaskExecutor for each term in which this node is primary.
+    const ConstructExecutorFn _constructExecutorFn;
+
+    std::unique_ptr<executor::TaskExecutor> _executor;
 
     std::vector<std::shared_ptr<PrimaryOnlyServiceInstance>> _instances;
 };
@@ -187,8 +216,13 @@ MONGO_INITIALIZER(RegisterPrimaryOnlyServices)(InitializerContext*) {
     PrimaryOnlyServiceRegistry registry;  // TODO make this a service context decoration
 
     auto group = std::make_unique<PrimaryOnlyServiceGroup>(
-        nullptr, NamespaceString("admin.myservice"), [](long long term) {
-            return std::make_shared<TestService>(term);
+        NamespaceString("admin.myservice"),
+        [](long long term) { return std::make_shared<TestService>(term); },
+        []() {
+            // todo make a real executor.  Must run in a compilation unit linked against Client and
+            // AuthorizationSession.
+            std::unique_ptr<executor::TaskExecutor> executor;
+            return executor;
         });
 
     registry.registerServiceGroup(std::move(group));
