@@ -58,7 +58,7 @@ public:
      * Must not block.
      * Throws on error.
      */
-    virtual void startup(BSONObj state) = 0;
+    virtual void initialize(BSONObj state) = 0;
 
     /**
      * The XXXXX mechanism will call this repeatedly as long as this node remains primary in _term.
@@ -68,9 +68,13 @@ public:
      * subsequent calls to startup with a 'state' object read at that optime to resume this work.
      * Throws on error.
      */
-    virtual OpTime runOnce(OperationContext* opCtx) = 0;
+    OpTime runOnce(OperationContext* opCtx) {
+        return runOnceImpl(opCtx);
+    }
 
 protected:
+    virtual OpTime runOnceImpl(OperationContext* opCtx) = 0;
+
     const long long _term;
 };
 
@@ -79,11 +83,11 @@ public:
     explicit TestService(long long term) : PrimaryOnlyServiceInstance(term) {}
     virtual ~TestService() = default;
 
-    void startup(BSONObj state) final {
+    void initialize(BSONObj state) final {
         myStateStruct = TestStruct::parse(IDLParserErrorContext("parsing test type"), state);
     }
 
-    OpTime runOnce(OperationContext* opCtx) final {
+    OpTime runOnceImpl(OperationContext* opCtx) final {
         auto storage = StorageInterface::get(opCtx);
 
         auto newState = myStateStruct.getMyState();
@@ -117,7 +121,7 @@ private:
 class PrimaryOnlyServiceGroup {
 private:
     using ConstructInstanceFn =
-        std::function<std::unique_ptr<PrimaryOnlyServiceInstance>(long long)>;
+        std::function<std::shared_ptr<PrimaryOnlyServiceInstance>(long long)>;
 
 public:
     PrimaryOnlyServiceGroup(executor::TaskExecutor* executor,
@@ -144,7 +148,7 @@ private:
             std::cout << doc.toString() << std::endl;
 
             _instances.push_back(_constructInstanceFn(term));
-            _instances.back()->startup(doc);
+            _instances.back()->initialize(doc);
             // todo start scheduling tasks to call 'runOnce' on instances.
         }
     }
@@ -156,10 +160,10 @@ private:
 
     const ConstructInstanceFn _constructInstanceFn;
 
-    std::vector<std::unique_ptr<PrimaryOnlyServiceInstance>> _instances;
+    std::vector<std::shared_ptr<PrimaryOnlyServiceInstance>> _instances;
 };
 
-class PrimaryOnlyServiceRegistry {
+class PrimaryOnlyServiceRegistry {  // todo make this a ReplicaSetAwareService
 public:
     PrimaryOnlyServiceRegistry() {}
     /**
@@ -180,11 +184,11 @@ private:
 };
 
 MONGO_INITIALIZER(RegisterPrimaryOnlyServices)(InitializerContext*) {
-    PrimaryOnlyServiceRegistry registry;  // really this'll be a service context decoration
+    PrimaryOnlyServiceRegistry registry;  // TODO make this a service context decoration
 
     auto group = std::make_unique<PrimaryOnlyServiceGroup>(
         nullptr, NamespaceString("admin.myservice"), [](long long term) {
-            return std::make_unique<TestService>(term);
+            return std::make_shared<TestService>(term);
         });
 
     registry.registerServiceGroup(std::move(group));
