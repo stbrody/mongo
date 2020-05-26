@@ -70,14 +70,17 @@ public:
      * subsequent calls to startup with a 'state' object read at that optime to resume this work.
      * Throws on error.
      */
-    OpTime runOnce(OperationContext* opCtx) {
-        return runOnceImpl(opCtx);
+    void runOnce(OperationContext* opCtx) {
+        // TODO write concern handling.
+        runOnceImpl(opCtx);
     }
 
 protected:
     virtual OpTime runOnceImpl(OperationContext* opCtx) = 0;
 
     const long long _term;
+
+    OpTime _optime;  // todo comment
 };
 
 class TestService : public PrimaryOnlyServiceInstance {
