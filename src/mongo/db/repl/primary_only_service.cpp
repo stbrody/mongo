@@ -27,7 +27,7 @@
  *    it in the license file.
  */
 
-#define MONGO_LOGV2_DEFAULT_COMPONENT ::mongo::logv2::LogComponent::kRepl
+#define MONGO_LOGV2_DEFAULT_COMPONENT ::mongo::logv2::LogComponent::kReplication
 
 #include "mongo/platform/basic.h"
 
@@ -39,6 +39,8 @@
 #include "mongo/db/repl/storage_interface.h"
 #include "mongo/db/repl/test_type_gen.h"
 #include "mongo/executor/task_executor.h"
+#include "mongo/logv2/log.h"
+#include "mongo/util/assert_util.h"
 
 #include <memory>
 #include <vector>
@@ -163,19 +165,75 @@ private:
 
             // start scheduling tasks to repeatedly call 'runOnce' on instances.
             auto res = _executor->scheduleWork(
-                [instance =
-                     _instances.back()](const mongo::executor::TaskExecutor::CallbackArgs& args) {
-                    uassertStatusOK(args.status);  // todo error handling
+                [this, instance = _instances.back()](
+                    const mongo::executor::TaskExecutor::CallbackArgs& args) {
+                    _taskInstanceRunner(args, instance);
                 });
             auto handle =
                 uassertStatusOK(res);  // throw away handle, not needed. TODO error handling.
         }
     }
 
-    void _taskInstanceRunner(OperationContext* opCtx,
-                             std::shared_ptr<PrimaryOnlyServiceInstance> instance) {
-        OpTime ot = instance->runOnce(opCtx);
-        std::cout << ot.toString();
+    /**
+     * Codes that happen during stepdown or shutdown.
+     */
+    static bool isExpected(Status status) {
+        return ErrorCodes::isNotMasterError(status.code()) ||
+            ErrorCodes::isShutdownError(status.code()) ||
+            ErrorCodes::CallbackCanceled == status.code();
+    }
+
+    void _taskInstanceRunner(const mongo::executor::TaskExecutor::CallbackArgs& args,
+                             std::shared_ptr<PrimaryOnlyServiceInstance> instance) noexcept {
+        Status status = args.status.isOK() ? args.opCtx->checkForInterruptNoAssert() : args.status;
+        if (!status.isOK()) {
+            if (isExpected(status)) {
+                LOGV2_DEBUG(0,
+                            2,
+                            "Received error in primary-only service, this is expected during "
+                            "stepdown or shutdown. {status}",
+                            "status"_attr = status);
+                return;
+            }
+            LOGV2_DEBUG(0,
+                        2,
+                        "Received unexpected error in primary-only service. Retrying. {status}",
+                        "status"_attr = status);
+        } else {
+            try {
+                instance->runOnce(args.opCtx);
+            } catch (const DBException& e) {
+                if (isExpected(e.toStatus())) {
+                    LOGV2_DEBUG(0,
+                                2,
+                                "got error that's expected during stepdown. {status}",
+                                "status"_attr = status);
+                    return;
+                }
+                LOGV2_DEBUG(0,
+                            2,
+                            "Got error that's not expected, retrying. {status}",
+                            "status"_attr = status);
+            }
+        }
+
+        // If we got this far this means we never encountered a non-recoverable error and thus
+        // should go ahead and schedule the next iteration of this task.
+        auto res =
+            _executor->scheduleWork([this, instance = _instances.back()](
+                                        const mongo::executor::TaskExecutor::CallbackArgs& args) {
+                _taskInstanceRunner(args, instance);
+            });
+        if (!res.isOK()) {
+            if (isExpected(res.getStatus())) {
+                LOGV2_DEBUG(0,
+                            2,
+                            "got error that's expected during stepdown. {status}",
+                            "status"_attr = status);
+                return;
+            }
+        }
+        invariantStatusOK(res);
     }
 
     // Namespace where docs containing state for instances of this service group are stored.
