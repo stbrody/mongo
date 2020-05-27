@@ -41,7 +41,7 @@ namespace repl {
 
 class PrimaryOnlyServiceInstance {
 public:
-    PrimaryOnlyServiceInstance(long long term, OpTime opTime) : _term(term), _optime(opTime) {}
+    PrimaryOnlyServiceInstance(long long term, OpTime opTime) : _term(term), _opTime(opTime) {}
     virtual ~PrimaryOnlyServiceInstance() = default;
 
     /**
@@ -59,17 +59,14 @@ public:
      * subsequent calls to startup with a 'state' object read at that optime to resume this work.
      * Throws on error.
      */
-    void runOnce(OperationContext* opCtx) {
-        // TODO write concern handling.
-        runOnceImpl(opCtx);
-    }
+    void runOnce(OperationContext* opCtx);
 
 protected:
     virtual OpTime runOnceImpl(OperationContext* opCtx) = 0;
 
     const long long _term;
 
-    OpTime _optime;  // todo comment
+    OpTime _opTime;  // todo comment
 };
 
 class PrimaryOnlyServiceGroup {

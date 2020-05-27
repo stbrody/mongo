@@ -45,12 +45,18 @@
 #include "mongo/db/repl/replication_coordinator.h"
 #include "mongo/db/repl/storage_interface.h"
 #include "mongo/db/repl/test_type_gen.h"
+#include "mongo/db/write_concern.h"
 #include "mongo/executor/task_executor.h"
 #include "mongo/logv2/log.h"
 #include "mongo/util/assert_util.h"
 
 namespace mongo {
 namespace repl {
+namespace {
+const WriteConcernOptions kMajorityWriteConcern(WriteConcernOptions::kMajority,
+                                                WriteConcernOptions::SyncMode::UNSET,
+                                                WriteConcernOptions::kWriteConcernTimeoutSystem);
+}
 
 
 // TODO move this to another file.
@@ -146,7 +152,9 @@ void PrimaryOnlyServiceGroup::_startup(OperationContext* opCtx, long long term) 
 namespace {
 bool isExpected(Status status) {
     return ErrorCodes::isNotMasterError(status.code()) ||
-        ErrorCodes::isShutdownError(status.code()) || ErrorCodes::CallbackCanceled == status.code();
+        ErrorCodes::isShutdownError(status.code()) ||
+        ErrorCodes::isWriteConcernError(status.code()) ||
+        ErrorCodes::CallbackCanceled == status.code();
 }
 }  // namespace
 
@@ -200,6 +208,18 @@ void PrimaryOnlyServiceGroup::_taskInstanceRunner(
         }
     }
     invariantStatusOK(res);
+}
+
+void PrimaryOnlyServiceInstance::runOnce(OperationContext* opCtx) {
+    // First, make sure that that any previous writes we did or state we observed has been majority
+    // committed.
+    WriteConcernResult wcResult;
+    Status wcStatus = waitForWriteConcern(opCtx, _opTime, kMajorityWriteConcern, &wcResult);
+    uassertStatusOK(wcStatus);
+
+    // Now run once iteration of this service instance, and remember the OpTime of any updates
+    // performed so that on the next iteration we can wait for those writes to be committed.
+    _opTime = runOnceImpl(opCtx);
 }
 
 MONGO_INITIALIZER(RegisterPrimaryOnlyServices)(InitializerContext*) {

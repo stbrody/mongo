@@ -1488,6 +1488,8 @@ env.Library(
     LIBDEPS=[
         '$BUILD_DIR/mongo/base',
         '$BUILD_DIR/mongo/idl/idl_parser',
+        '$BUILD_DIR/mongo/db/rw_concern_d',
+        'repl_coordinator_interface',
         'storage_interface',
     ],
 )
