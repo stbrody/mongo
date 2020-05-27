@@ -43,6 +43,7 @@
 #include "mongo/db/repl/repl_client_info.h"
 #include "mongo/db/repl/replication_coordinator.h"
 #include "mongo/db/repl/storage_interface.h"
+#include "mongo/db/service_context.h"
 #include "mongo/db/write_concern.h"
 #include "mongo/executor/task_executor.h"
 #include "mongo/logv2/log.h"
@@ -54,6 +55,12 @@ namespace {
 const WriteConcernOptions kMajorityWriteConcern(WriteConcernOptions::kMajority,
                                                 WriteConcernOptions::SyncMode::UNSET,
                                                 WriteConcernOptions::kWriteConcernTimeoutSystem);
+
+const auto registryDecoration = ServiceContext::declareDecoration<PrimaryOnlyServiceRegistry>();
+}  // namespace
+
+PrimaryOnlyServiceRegistry* PrimaryOnlyServiceRegistry::get(ServiceContext* serviceContext) {
+    return &registryDecoration(serviceContext);
 }
 
 PrimaryOnlyServiceGroup::PrimaryOnlyServiceGroup(NamespaceString ns,

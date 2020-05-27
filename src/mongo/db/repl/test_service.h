@@ -27,56 +27,32 @@
  *    it in the license file.
  */
 
-#define MONGO_LOGV2_DEFAULT_COMPONENT ::mongo::logv2::LogComponent::kReplication
+#pragma once
 
-#include "mongo/platform/basic.h"
-
-#include "mongo/db/repl/test_service.h"
-
-#include <memory>
-
-#include "mongo/base/init.h"
-#include "mongo/bson/bsonobj.h"
+#include "mongo/db/operation_context.h"
 #include "mongo/db/repl/primary_only_service.h"
-#include "mongo/db/repl/repl_client_info.h"
-#include "mongo/db/repl/storage_interface.h"
 #include "mongo/db/repl/test_type_gen.h"
-#include "mongo/logv2/log.h"
 
 namespace mongo {
 namespace repl {
 
-
-void TestService::initialize(BSONObj state) {
-    myStateStruct = TestStruct::parse(IDLParserErrorContext("parsing test type"), state);
-}
-
-OpTime TestService::runOnceImpl(OperationContext* opCtx) {
-    auto storage = StorageInterface::get(opCtx);
-
-    auto newState = myStateStruct.getMyState();
-    switch (myStateStruct.getMyState()) {
-        case TestServiceStateEnum::kStateFoo:
-            newState = TestServiceStateEnum::kStateBar;
-            break;
-        case TestServiceStateEnum::kStateBar:
-            newState = TestServiceStateEnum::kStateBaz;
-            break;
-        case TestServiceStateEnum::kStateBaz:
-            newState = TestServiceStateEnum::kStateFoo;
-            break;
+class TestService : public PrimaryOnlyServiceInstance {
+public:
+    static NamespaceString ns() {
+        return NamespaceString{"admin.test_service"};
     }
-    myStateStruct.setMyState(newState);
 
-    BSONObj stateObj = myStateStruct.toBSON();
-    TimestampedBSONObj update;
-    update.obj = stateObj;
+    TestService(long long term, OpTime opTime)
+        : PrimaryOnlyServiceInstance(term, std::move(opTime)) {}
+    virtual ~TestService() = default;
 
-    uassertStatusOK(storage->updateSingleton(
-        opCtx, NamespaceString("admin.myservice"), stateObj.getField("_id").wrap(), update));
+    void initialize(BSONObj state) final;
 
-    return ReplClientInfo::forClient(opCtx->getClient()).getLastOp();
-}
+    OpTime runOnceImpl(OperationContext* opCtx) final;
+
+private:
+    TestStruct myStateStruct;
+};
 
 }  // namespace repl
 }  // namespace mongo

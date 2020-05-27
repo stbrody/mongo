@@ -29,7 +29,9 @@
 
 #pragma once
 
+#include "mongo/bson/bsonobj.h"
 #include "mongo/db/operation_context.h"
+#include "mongo/db/repl/optime.h"
 #include "mongo/executor/task_executor.h"
 
 #include <functional>
@@ -69,6 +71,7 @@ protected:
     OpTime _opTime;  // todo comment
 };
 
+// TODO how do you start a new instance on the fly?
 class PrimaryOnlyServiceGroup {
 private:
     using ConstructExecutorFn = std::function<std::unique_ptr<executor::TaskExecutor>()>;
@@ -108,6 +111,9 @@ private:
 class PrimaryOnlyServiceRegistry {  // todo make this a ReplicaSetAwareService
 public:
     PrimaryOnlyServiceRegistry() {}
+
+    static PrimaryOnlyServiceRegistry* get(ServiceContext* serviceContext);
+
     /**
      * Iterates over all registered services and starts them up.
      */

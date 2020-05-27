@@ -110,6 +110,7 @@
 #include "mongo/db/repair_database_and_check_version.h"
 #include "mongo/db/repl/drop_pending_collection_reaper.h"
 #include "mongo/db/repl/oplog.h"
+#include "mongo/db/repl/primary_only_service.h"
 #include "mongo/db/repl/repl_settings.h"
 #include "mongo/db/repl/replication_consistency_markers_impl.h"
 #include "mongo/db/repl/replication_coordinator.h"
@@ -119,6 +120,7 @@
 #include "mongo/db/repl/replication_process.h"
 #include "mongo/db/repl/replication_recovery.h"
 #include "mongo/db/repl/storage_interface_impl.h"
+#include "mongo/db/repl/test_service.h"
 #include "mongo/db/repl/topology_coordinator.h"
 #include "mongo/db/repl_set_member_in_standalone_mode.h"
 #include "mongo/db/replica_set_aware_service.h"
@@ -945,6 +947,24 @@ auto makeReplicationExecutor(ServiceContext* serviceContext) {
         executor::makeNetworkInterface("ReplNetwork", nullptr, std::move(hookList)));
 }
 
+void setUpPrimaryOnlyServices(ServiceContext* serviceContext) {
+    auto registry = repl::PrimaryOnlyServiceRegistry::get(serviceContext);
+
+    auto group = std::make_unique<repl::PrimaryOnlyServiceGroup>(
+        repl::TestService::ns(),
+        [](long long term, repl::OpTime opTime) {
+            return std::make_shared<repl::TestService>(term, opTime);
+        },
+        []() {
+            // todo make a real executor.  Must run in a compilation unit
+            // linked against Client and AuthorizationSession.
+            std::unique_ptr<executor::TaskExecutor> executor;
+            return executor;
+        });
+
+    registry->registerServiceGroup(std::move(group));
+}
+
 void setUpReplication(ServiceContext* serviceContext) {
     repl::StorageInterface::set(serviceContext, std::make_unique<repl::StorageInterfaceImpl>());
     auto storageInterface = repl::StorageInterface::get(serviceContext);
@@ -990,6 +1010,8 @@ void setUpReplication(ServiceContext* serviceContext) {
     repl::setOplogCollectionName(serviceContext);
 
     IndexBuildsCoordinator::set(serviceContext, std::make_unique<IndexBuildsCoordinatorMongod>());
+
+    setUpPrimaryOnlyServices(serviceContext);
 }
 
 void setUpObservers(ServiceContext* serviceContext) {
