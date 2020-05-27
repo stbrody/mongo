@@ -955,7 +955,7 @@ void setUpPrimaryOnlyServices(ServiceContext* serviceContext) {
         [](long long term, repl::OpTime opTime) {
             return std::make_shared<repl::TestService>(term, opTime);
         },
-        []() { return repl::TestService::makeTaskExecutor(); });
+        [serviceContext]() { return repl::TestService::makeTaskExecutor(serviceContext); });
 
     registry->registerServiceGroup(std::move(group));
 }

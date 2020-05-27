@@ -37,21 +37,44 @@
 
 #include "mongo/base/init.h"
 #include "mongo/bson/bsonobj.h"
+#include "mongo/db/auth/authorization_session.h"
+#include "mongo/db/client.h"
+#include "mongo/db/logical_time_metadata_hook.h"
 #include "mongo/db/repl/primary_only_service.h"
 #include "mongo/db/repl/repl_client_info.h"
 #include "mongo/db/repl/storage_interface.h"
 #include "mongo/db/repl/test_type_gen.h"
+#include "mongo/executor/network_interface_factory.h"
 #include "mongo/executor/task_executor.h"
+#include "mongo/executor/thread_pool_task_executor.h"
 #include "mongo/logv2/log.h"
+#include "mongo/rpc/metadata/egress_metadata_hook_list.h"
+#include "mongo/util/concurrency/thread_pool.h"
 
 namespace mongo {
 namespace repl {
+namespace {
+const std::string kThreadNamePrefix = "TestServiceThread-";
+const std::string kPoolName = "TestServiceThreadPool";
+const std::string kNetworkName = "TestServiceNetwork";
+}  // namespace
 
-std::unique_ptr<executor::TaskExecutor> TestService::makeTaskExecutor() {
-    // todo make a real executor.  Must run in a compilation unit
-    // linked against Client and AuthorizationSession.
-    std::unique_ptr<executor::TaskExecutor> executor;
-    return executor;
+std::unique_ptr<executor::TaskExecutor> TestService::makeTaskExecutor(
+    ServiceContext* serviceContext) {
+    ThreadPool::Options threadPoolOptions;
+    threadPoolOptions.threadNamePrefix = kThreadNamePrefix;
+    threadPoolOptions.poolName = kPoolName;
+    threadPoolOptions.onCreateThread = [](const std::string& threadName) {
+        Client::initThread(threadName.c_str());
+        AuthorizationSession::get(cc())->grantInternalAuthorization(&cc());
+    };
+    auto pool = std::make_unique<ThreadPool>(threadPoolOptions);
+
+    auto hookList = std::make_unique<rpc::EgressMetadataHookList>();
+    hookList->addHook(std::make_unique<rpc::LogicalTimeMetadataHook>(serviceContext));
+    auto networkName = kNetworkName;
+    return std::make_unique<executor::ThreadPoolTaskExecutor>(
+        std::move(pool), executor::makeNetworkInterface(networkName, nullptr, std::move(hookList)));
 }
 
 void TestService::initialize(BSONObj state) {

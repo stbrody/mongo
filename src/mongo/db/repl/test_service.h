@@ -45,7 +45,7 @@ public:
         return NamespaceString{"admin.test_service"};
     }
 
-    static std::unique_ptr<executor::TaskExecutor> makeTaskExecutor();
+    static std::unique_ptr<executor::TaskExecutor> makeTaskExecutor(ServiceContext* serviceContext);
 
     TestService(long long term, OpTime opTime)
         : PrimaryOnlyServiceInstance(term, std::move(opTime)) {}
