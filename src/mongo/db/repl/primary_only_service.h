@@ -41,7 +41,7 @@ namespace repl {
 
 class PrimaryOnlyServiceInstance {
 public:
-    explicit PrimaryOnlyServiceInstance(long long term) : _term(term) {}
+    PrimaryOnlyServiceInstance(long long term, OpTime opTime) : _term(term), _optime(opTime) {}
     virtual ~PrimaryOnlyServiceInstance() = default;
 
     /**
@@ -76,7 +76,7 @@ class PrimaryOnlyServiceGroup {
 private:
     using ConstructExecutorFn = std::function<std::unique_ptr<executor::TaskExecutor>()>;
     using ConstructInstanceFn =
-        std::function<std::shared_ptr<PrimaryOnlyServiceInstance>(long long)>;
+        std::function<std::shared_ptr<PrimaryOnlyServiceInstance>(long long, OpTime)>;
 
 public:
     PrimaryOnlyServiceGroup(NamespaceString ns,

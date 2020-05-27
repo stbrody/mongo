@@ -42,6 +42,7 @@
 #include "mongo/db/namespace_string.h"
 #include "mongo/db/repl/optime.h"
 #include "mongo/db/repl/repl_client_info.h"
+#include "mongo/db/repl/replication_coordinator.h"
 #include "mongo/db/repl/storage_interface.h"
 #include "mongo/db/repl/test_type_gen.h"
 #include "mongo/executor/task_executor.h"
@@ -55,7 +56,8 @@ namespace repl {
 // TODO move this to another file.
 class TestService : public PrimaryOnlyServiceInstance {
 public:
-    explicit TestService(long long term) : PrimaryOnlyServiceInstance(term) {}
+    TestService(long long term, OpTime opTime)
+        : PrimaryOnlyServiceInstance(term, std::move(opTime)) {}
     virtual ~TestService() = default;
 
     void initialize(BSONObj state) final {
@@ -123,10 +125,12 @@ void PrimaryOnlyServiceGroup::_startup(OperationContext* opCtx, long long term) 
     auto storage = StorageInterface::get(opCtx);
     const auto docs =
         uassertStatusOK(storage->findAllDocuments(opCtx, _ns));  // todo safe to throw/uassert?
+    const auto opTime =
+        uassertStatusOK(ReplicationCoordinator::get(opCtx)->getLatestWriteOpTime(opCtx));
     for (const auto& doc : docs) {
         std::cout << doc.toString() << std::endl;
 
-        _instances.push_back(_constructInstanceFn(term));
+        _instances.push_back(_constructInstanceFn(term, std::move(opTime)));
         _instances.back()->initialize(doc);
 
         // start scheduling tasks to repeatedly call 'runOnce' on instances.
@@ -140,9 +144,6 @@ void PrimaryOnlyServiceGroup::_startup(OperationContext* opCtx, long long term) 
 }
 
 namespace {
-/**
- * Codes that happen during stepdown or shutdown.
- */
 bool isExpected(Status status) {
     return ErrorCodes::isNotMasterError(status.code()) ||
         ErrorCodes::isShutdownError(status.code()) || ErrorCodes::CallbackCanceled == status.code();
@@ -206,7 +207,7 @@ MONGO_INITIALIZER(RegisterPrimaryOnlyServices)(InitializerContext*) {
 
     auto group = std::make_unique<PrimaryOnlyServiceGroup>(
         NamespaceString("admin.myservice"),
-        [](long long term) { return std::make_shared<TestService>(term); },
+        [](long long term, OpTime opTime) { return std::make_shared<TestService>(term, opTime); },
         []() {
             // todo make a real executor.  Must run in a compilation unit linked against Client and
             // AuthorizationSession.
