@@ -123,6 +123,12 @@ public:
         }
     }
 
+    void onStepDown() {
+        for (auto& service : _services) {
+            service->shutdown();
+        }
+    }
+
     void registerServiceGroup(std::unique_ptr<PrimaryOnlyServiceGroup> service) {
         _services.push_back(std::move(service));
     }

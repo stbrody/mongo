@@ -70,6 +70,7 @@
 #include "mongo/db/repl/oplog.h"
 #include "mongo/db/repl/oplog_applier_impl.h"
 #include "mongo/db/repl/oplog_buffer_blocking_queue.h"
+#include "mongo/db/repl/primary_only_service.h"
 #include "mongo/db/repl/repl_server_parameters_gen.h"
 #include "mongo/db/repl/repl_settings.h"
 #include "mongo/db/repl/replication_coordinator.h"
@@ -527,6 +528,8 @@ OpTime ReplicationCoordinatorExternalStateImpl::onTransitionToPrimary(OperationC
 
     _shardingOnTransitionToPrimaryHook(opCtx);
     ReplicaSetAwareServiceRegistry::get(_service).onStepUpComplete(opCtx);
+    // todo Merge this into ReplicaSetAwareService and thread the term through.
+    PrimaryOnlyServiceRegistry::get(_service)->onStepUp(0 /*term*/);
 
     _dropAllTempCollections(opCtx);
 
@@ -749,6 +752,7 @@ void ReplicationCoordinatorExternalStateImpl::closeConnections() {
 
 void ReplicationCoordinatorExternalStateImpl::onStepDownHook() {
     ReplicaSetAwareServiceRegistry::get(_service).onStepDown();
+    PrimaryOnlyServiceRegistry::get(_service)->onStepDown();
     _shardingOnStepDownHook();
     stopNoopWriter();
     _stopAsyncUpdatesOfAndClearOplogTruncateAfterPoint();
