@@ -420,6 +420,7 @@ mongod = env.Program(
         'db/repl/rslog',
         'db/repl/serveronly_repl',
         'db/repl/storage_interface_impl',
+        'db/repl/test_service',
         'db/repl/topology_coordinator',
         'db/replica_set_aware_service',
         'db/rw_concern_d',

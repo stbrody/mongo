@@ -37,14 +37,12 @@
 #include <memory>
 #include <vector>
 
-#include "mongo/base/init.h"
 #include "mongo/bson/bsonobj.h"
 #include "mongo/db/namespace_string.h"
 #include "mongo/db/repl/optime.h"
 #include "mongo/db/repl/repl_client_info.h"
 #include "mongo/db/repl/replication_coordinator.h"
 #include "mongo/db/repl/storage_interface.h"
-#include "mongo/db/repl/test_type_gen.h"
 #include "mongo/db/write_concern.h"
 #include "mongo/executor/task_executor.h"
 #include "mongo/logv2/log.h"
@@ -57,50 +55,6 @@ const WriteConcernOptions kMajorityWriteConcern(WriteConcernOptions::kMajority,
                                                 WriteConcernOptions::SyncMode::UNSET,
                                                 WriteConcernOptions::kWriteConcernTimeoutSystem);
 }
-
-
-// TODO move this to another file.
-class TestService : public PrimaryOnlyServiceInstance {
-public:
-    TestService(long long term, OpTime opTime)
-        : PrimaryOnlyServiceInstance(term, std::move(opTime)) {}
-    virtual ~TestService() = default;
-
-    void initialize(BSONObj state) final {
-        myStateStruct = TestStruct::parse(IDLParserErrorContext("parsing test type"), state);
-    }
-
-    OpTime runOnceImpl(OperationContext* opCtx) final {
-        auto storage = StorageInterface::get(opCtx);
-
-        auto newState = myStateStruct.getMyState();
-        switch (myStateStruct.getMyState()) {
-            case TestServiceStateEnum::kStateFoo:
-                newState = TestServiceStateEnum::kStateBar;
-                break;
-            case TestServiceStateEnum::kStateBar:
-                newState = TestServiceStateEnum::kStateBaz;
-                break;
-            case TestServiceStateEnum::kStateBaz:
-                newState = TestServiceStateEnum::kStateFoo;
-                break;
-        }
-        myStateStruct.setMyState(newState);
-
-        BSONObj stateObj = myStateStruct.toBSON();
-        TimestampedBSONObj update;
-        update.obj = stateObj;
-
-        uassertStatusOK(storage->updateSingleton(
-            opCtx, NamespaceString("admin.myservice"), stateObj.getField("_id").wrap(), update));
-
-        return ReplClientInfo::forClient(opCtx->getClient()).getLastOp();
-    }
-
-private:
-    TestStruct myStateStruct;
-};
-
 
 PrimaryOnlyServiceGroup::PrimaryOnlyServiceGroup(NamespaceString ns,
                                                  ConstructInstanceFn constructInstanceFn,
@@ -220,23 +174,6 @@ void PrimaryOnlyServiceInstance::runOnce(OperationContext* opCtx) {
     // Now run once iteration of this service instance, and remember the OpTime of any updates
     // performed so that on the next iteration we can wait for those writes to be committed.
     _opTime = runOnceImpl(opCtx);
-}
-
-MONGO_INITIALIZER(RegisterPrimaryOnlyServices)(InitializerContext*) {
-    PrimaryOnlyServiceRegistry registry;  // TODO make this a service context decoration
-
-    auto group = std::make_unique<PrimaryOnlyServiceGroup>(
-        NamespaceString("admin.myservice"),
-        [](long long term, OpTime opTime) { return std::make_shared<TestService>(term, opTime); },
-        []() {
-            // todo make a real executor.  Must run in a compilation unit linked against Client and
-            // AuthorizationSession.
-            std::unique_ptr<executor::TaskExecutor> executor;
-            return executor;
-        });
-
-    registry.registerServiceGroup(std::move(group));
-    return Status::OK();
 }
 
 }  // namespace repl

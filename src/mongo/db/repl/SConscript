@@ -1483,7 +1483,6 @@ env.Library(
     target='primary_only_service',
     source=[
         'primary_only_service.cpp',
-        env.Idlc('test_type.idl')[0],
     ],
     LIBDEPS=[
         '$BUILD_DIR/mongo/base',
@@ -1494,13 +1493,25 @@ env.Library(
     ],
 )
 
-env.CppUnitTest(
-    target='primary_only_service_test',
+env.Library(
+    target='test_service',
     source=[
-        'primary_only_service_test.cpp',
+        'test_service.cpp',
+        env.Idlc('test_type.idl')[0],
     ],
     LIBDEPS=[
+        '$BUILD_DIR/mongo/base',
         'primary_only_service',
-    ]
+    ],
 )
+
+# env.CppUnitTest(
+#     target='primary_only_service_test',
+#     source=[
+#         'primary_only_service_test.cpp',
+#     ],
+#     LIBDEPS=[
+#         'primary_only_service',
+#     ]
+# )
 
