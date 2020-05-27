@@ -955,12 +955,7 @@ void setUpPrimaryOnlyServices(ServiceContext* serviceContext) {
         [](long long term, repl::OpTime opTime) {
             return std::make_shared<repl::TestService>(term, opTime);
         },
-        []() {
-            // todo make a real executor.  Must run in a compilation unit
-            // linked against Client and AuthorizationSession.
-            std::unique_ptr<executor::TaskExecutor> executor;
-            return executor;
-        });
+        []() { return repl::TestService::makeTaskExecutor(); });
 
     registry->registerServiceGroup(std::move(group));
 }

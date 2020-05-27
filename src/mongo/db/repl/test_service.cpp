@@ -41,11 +41,18 @@
 #include "mongo/db/repl/repl_client_info.h"
 #include "mongo/db/repl/storage_interface.h"
 #include "mongo/db/repl/test_type_gen.h"
+#include "mongo/executor/task_executor.h"
 #include "mongo/logv2/log.h"
 
 namespace mongo {
 namespace repl {
 
+std::unique_ptr<executor::TaskExecutor> TestService::makeTaskExecutor() {
+    // todo make a real executor.  Must run in a compilation unit
+    // linked against Client and AuthorizationSession.
+    std::unique_ptr<executor::TaskExecutor> executor;
+    return executor;
+}
 
 void TestService::initialize(BSONObj state) {
     myStateStruct = TestStruct::parse(IDLParserErrorContext("parsing test type"), state);

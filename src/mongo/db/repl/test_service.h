@@ -32,6 +32,9 @@
 #include "mongo/db/operation_context.h"
 #include "mongo/db/repl/primary_only_service.h"
 #include "mongo/db/repl/test_type_gen.h"
+#include "mongo/executor/task_executor.h"
+
+#include <memory>
 
 namespace mongo {
 namespace repl {
@@ -41,6 +44,8 @@ public:
     static NamespaceString ns() {
         return NamespaceString{"admin.test_service"};
     }
+
+    static std::unique_ptr<executor::TaskExecutor> makeTaskExecutor();
 
     TestService(long long term, OpTime opTime)
         : PrimaryOnlyServiceInstance(term, std::move(opTime)) {}
