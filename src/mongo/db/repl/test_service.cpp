@@ -37,6 +37,7 @@
 
 #include "mongo/base/init.h"
 #include "mongo/bson/bsonobj.h"
+#include "mongo/bson/oid.h"
 #include "mongo/db/auth/authorization_session.h"
 #include "mongo/db/client.h"
 #include "mongo/db/commands.h"
@@ -108,8 +109,7 @@ OpTime TestService::runOnceImpl(OperationContext* opCtx) {
     update.obj = stateObj;
 
     auto storage = StorageInterface::get(opCtx);
-    uassertStatusOK(storage->updateSingleton(
-        opCtx, NamespaceString("admin.myservice"), stateObj.getField("_id").wrap(), update));
+    uassertStatusOK(storage->putSingleton(opCtx, TestService::ns(), update));
 
     return ReplClientInfo::forClient(opCtx->getClient()).getLastOp();
 }
@@ -146,6 +146,7 @@ public:
 
         TestStruct initialState;
         initialState.setMyState(TestServiceStateEnum::kStateFoo);
+        initialState.set_id(OID::gen());
 
         auto storage = StorageInterface::get(opCtx);
         auto status = storage->createCollection(opCtx, TestService::ns(), CollectionOptions());

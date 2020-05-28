@@ -118,7 +118,11 @@ void PrimaryOnlyServiceGroup::shutdown() {
     stdx::lock_guard<Latch> lk(_mutex);
     invariant(_term.is_initialized());
     _term.reset();
+    LOGV2(0, "##### STOPPING SERVICE");
     _executor->shutdown();
+    LOGV2(0, "##### JOINING SERVICE");
+    _executor->join();
+    LOGV2(0, "##### SERVICE STOPPED!!!!!!");
     _executor.reset();
 }
 
@@ -178,14 +182,15 @@ bool isExpected(Status status) {
 void PrimaryOnlyServiceGroup::_taskInstanceRunner(
     const mongo::executor::TaskExecutor::CallbackArgs& args,
     std::shared_ptr<PrimaryOnlyServiceInstance> instance) noexcept {
-
+    LOGV2(0, "RUNNING ONE INSTANCE");
     if (!args.status.isOK()) {
         if (isExpected(args.status)) {
             LOGV2_DEBUG(0,
-                        2,
+                        0,  // 2
                         "Received expected error in primary-only service, indicating stepdown or "
                         "shutdown: {error}",
                         "error"_attr = args.status);
+            LOGV2(0, "##### STOPPING SERVICE1");
             return;
         }
         LOGV2_FATAL(0,
@@ -193,12 +198,21 @@ void PrimaryOnlyServiceGroup::_taskInstanceRunner(
                     "status"_attr = args.status);
         return;  // unreachable
     }
+    LOGV2(0, "GOT PAST CALLBACK CANCELLED CHECK");
 
     auto opCtx = cc().makeOperationContext();
     auto replCoord = ReplicationCoordinator::get(opCtx.get());
     // NOTE: perf cost of these repl checks vs making service implementation check?
-    if (!replCoord->canAcceptNonLocalWrites() || replCoord->getTerm() != instance->getTerm()) {
-        LOGV2_DEBUG(0, 2, "No longer primary while running primary only service");
+    if (!replCoord
+             ->canAcceptNonLocalWrites() /*|| replCoord->getTerm() != instance->getTerm()*/) {  // todo re-enable term check when term is provided properly by repl coord.
+        LOGV2_DEBUG(
+            0,
+            0 /*2*/,
+            "No longer primary while running primary only service. {currentTerm}, {expectedTerm}",
+            "currentTerm"_attr = replCoord->getTerm(),
+            "expectedTerm"_attr = instance->getTerm());
+        LOGV2(0, "##### STOPPING SERVICE2");
+        return;
     }
 
     // If we got this far we're still primary, and in the same term.
@@ -207,13 +221,14 @@ void PrimaryOnlyServiceGroup::_taskInstanceRunner(
     } catch (const DBException& e) {
         if (isExpected(e.toStatus())) {
             LOGV2_DEBUG(0,
-                        2,
+                        0,  // 2
                         "got error that's expected during stepdown. {status}",
                         "status"_attr = e.toStatus());
+            LOGV2(0, "##### STOPPING SERVICE3");
             return;
         }
         LOGV2_DEBUG(0,
-                    2,
+                    0,  // 2
                     "Got error that's not expected, retrying. {status}",
                     "status"_attr = e.toStatus());
     }
@@ -228,9 +243,10 @@ void PrimaryOnlyServiceGroup::_taskInstanceRunner(
     if (!res.isOK()) {
         if (isExpected(res.getStatus())) {
             LOGV2_DEBUG(0,
-                        2,
+                        0,  // 2
                         "got error that's expected during stepdown. {status}",
                         "status"_attr = res.getStatus());
+            LOGV2(0, "##### STOPPING SERVICE4");
             return;
         }
     }
