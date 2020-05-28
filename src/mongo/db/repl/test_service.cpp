@@ -157,7 +157,7 @@ public:
         update.obj = initialState.toBSON();
         uassertStatusOK(storage->putSingleton(opCtx, TestService::ns(), update));
 
-        service->startNewInstance(update.obj,
+        service->startNewInstance(std::move(update.obj),
                                   ReplClientInfo::forClient(opCtx->getClient()).getLastOp());
         return true;
     }

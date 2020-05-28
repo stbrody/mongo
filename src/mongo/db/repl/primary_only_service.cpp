@@ -118,11 +118,11 @@ void PrimaryOnlyServiceGroup::shutdown() {
 }
 
 // todo concurrency
-void PrimaryOnlyServiceGroup::startNewInstance(const BSONObj& initialState,
-                                               const OpTime& initialOpTime) {
+void PrimaryOnlyServiceGroup::startNewInstance(BSONObj initialState, OpTime initialOpTime) {
     // todo log something.
-    _instances.push_back(_constructInstanceFn(_term, std::move(initialOpTime)));
-    _instances.back()->initialize(initialState);
+    // todo check term to see that we're still primary and handle if not.
+    _instances.push_back(_constructInstanceFn(*_term, std::move(initialOpTime)));
+    _instances.back()->initialize(std::move(initialState));
 
     // start scheduling tasks to repeatedly call 'runOnce' on instances.
     auto res =

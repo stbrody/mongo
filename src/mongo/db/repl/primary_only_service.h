@@ -91,10 +91,10 @@ public:
 
     void shutdown();
 
-    void startNewInstance(const BSONObj& initialState, const OpTime& initialOpTime);
+    void startNewInstance(BSONObj initialState, OpTime initialOpTime);
 
 private:
-    void _startNewInstance(WithLock, const BSONObj& initialState, const OpTime& initialOpTime);
+    void _startNewInstance(WithLock, BSONObj initialState, OpTime initialOpTime);
 
     void _startup(OperationContext* opCtx);
 
