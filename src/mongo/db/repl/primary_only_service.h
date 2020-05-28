@@ -50,6 +50,10 @@ public:
     PrimaryOnlyServiceInstance(long long term, OpTime opTime) : _term(term), _opTime(opTime) {}
     virtual ~PrimaryOnlyServiceInstance() = default;
 
+    long long getTerm() const {
+        return _term;
+    }
+
     /**
      * Initialize any needed initial state based on the state document provided.
      * Must not block.

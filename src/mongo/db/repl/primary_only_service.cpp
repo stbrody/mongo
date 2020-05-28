@@ -38,9 +38,9 @@
 #include <vector>
 
 #include "mongo/bson/bsonobj.h"
+#include "mongo/db/client.h"
 #include "mongo/db/namespace_string.h"
 #include "mongo/db/repl/optime.h"
-#include "mongo/db/repl/repl_client_info.h"
 #include "mongo/db/repl/replication_coordinator.h"
 #include "mongo/db/repl/storage_interface.h"
 #include "mongo/db/service_context.h"
@@ -98,6 +98,7 @@ PrimaryOnlyServiceGroup::PrimaryOnlyServiceGroup(NamespaceString ns,
       _constructExecutorFn(constructExecutorFn) {}
 
 void PrimaryOnlyServiceGroup::startup(long long term) {
+    stdx::lock_guard<Latch> lk(_mutex);
     invariant(!_term.is_initialized());
     _term = term;
     _executor = _constructExecutorFn();
@@ -106,12 +107,15 @@ void PrimaryOnlyServiceGroup::startup(long long term) {
     auto res = _executor->scheduleWork(
         [this, term](const mongo::executor::TaskExecutor::CallbackArgs& args) {
             uassertStatusOK(args.status);  // todo error handling
-            _startup(args.opCtx);
+            auto opCtx = cc().makeOperationContext();
+
+            _startup(opCtx.get());
         });
     auto handle = uassertStatusOK(res);  // throw away handle, not needed.
 }
 
 void PrimaryOnlyServiceGroup::shutdown() {
+    stdx::lock_guard<Latch> lk(_mutex);
     invariant(_term.is_initialized());
     _term.reset();
     _executor->shutdown();
@@ -144,7 +148,14 @@ void PrimaryOnlyServiceGroup::_startNewInstance(WithLock lk,
 }
 
 void PrimaryOnlyServiceGroup::_startup(OperationContext* opCtx) {
+    invariant(opCtx);
     auto storage = StorageInterface::get(opCtx);
+    invariant(storage);
+
+    auto status = storage->createCollection(opCtx, _ns, CollectionOptions());
+    if (status != ErrorCodes::NamespaceExists) {
+        uassertStatusOK(status);
+    }
     const auto docs =
         uassertStatusOK(storage->findAllDocuments(opCtx, _ns));  // todo safe to throw/uassert?
     const auto opTime =
@@ -168,41 +179,51 @@ bool isExpected(Status status) {
 void PrimaryOnlyServiceGroup::_taskInstanceRunner(
     const mongo::executor::TaskExecutor::CallbackArgs& args,
     std::shared_ptr<PrimaryOnlyServiceInstance> instance) noexcept {
-    Status status = args.status.isOK() ? args.opCtx->checkForInterruptNoAssert() : args.status;
-    if (!status.isOK()) {
-        if (isExpected(status)) {
+
+    if (!args.status.isOK()) {
+        if (isExpected(args.status)) {
             LOGV2_DEBUG(0,
                         2,
-                        "Received error in primary-only service, this is expected during "
-                        "stepdown or shutdown. {status}",
-                        "status"_attr = status);
+                        "Received expected error in primary-only service, indicating stepdown or "
+                        "shutdown: {error}",
+                        "error"_attr = args.status);
+            return;
+        }
+        LOGV2_FATAL(0,
+                    "Received unexpected error in primary-only service. {status}",
+                    "status"_attr = args.status);
+        return;  // unreachable
+    }
+
+    auto opCtx = cc().makeOperationContext();
+    auto replCoord = ReplicationCoordinator::get(opCtx.get());
+    // NOTE: perf cost of these repl checks vs making service implementation check?
+    if (!replCoord->canAcceptNonLocalWrites() || replCoord->getTerm() != instance->getTerm()) {
+        LOGV2_DEBUG(0, 2, "No longer primary while running primary only service");
+    }
+
+    // If we got this far we're still primary, and in the same term.
+    try {
+        instance->runOnce(opCtx.get());
+    } catch (const DBException& e) {
+        if (isExpected(e.toStatus())) {
+            LOGV2_DEBUG(0,
+                        2,
+                        "got error that's expected during stepdown. {status}",
+                        "status"_attr = e.toStatus());
             return;
         }
         LOGV2_DEBUG(0,
                     2,
-                    "Received unexpected error in primary-only service. Retrying. {status}",
-                    "status"_attr = status);
-    } else {
-        try {
-            instance->runOnce(args.opCtx);
-        } catch (const DBException& e) {
-            if (isExpected(e.toStatus())) {
-                LOGV2_DEBUG(0,
-                            2,
-                            "got error that's expected during stepdown. {status}",
-                            "status"_attr = status);
-                return;
-            }
-            LOGV2_DEBUG(
-                0, 2, "Got error that's not expected, retrying. {status}", "status"_attr = status);
-        }
+                    "Got error that's not expected, retrying. {status}",
+                    "status"_attr = e.toStatus());
     }
+
 
     // If we got this far this means we never encountered a non-recoverable error and thus
     // should go ahead and schedule the next iteration of this task.
-    auto res =
-        _executor->scheduleWork([this, instance = _instances.back()](
-                                    const mongo::executor::TaskExecutor::CallbackArgs& args) {
+    auto res = _executor->scheduleWork(
+        [this, instance](const mongo::executor::TaskExecutor::CallbackArgs& args) {
             _taskInstanceRunner(args, instance);
         });
     if (!res.isOK()) {
@@ -210,7 +231,7 @@ void PrimaryOnlyServiceGroup::_taskInstanceRunner(
             LOGV2_DEBUG(0,
                         2,
                         "got error that's expected during stepdown. {status}",
-                        "status"_attr = status);
+                        "status"_attr = res.getStatus());
             return;
         }
     }

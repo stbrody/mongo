@@ -228,7 +228,7 @@ public:
                              boost::none,
                              ScanDirection::kForward,
                              BSONObj(),
-                             BoundInclusion::kExcludeBothStartAndEndKeys,
+                             BoundInclusion::kIncludeStartKeyOnly,
                              1000);  // todo make this actually infinity
     }
 
