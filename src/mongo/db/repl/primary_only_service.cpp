@@ -152,12 +152,11 @@ void PrimaryOnlyServiceGroup::_startup(OperationContext* opCtx) {
     auto storage = StorageInterface::get(opCtx);
     invariant(storage);
 
-    auto status = storage->createCollection(opCtx, _ns, CollectionOptions());
-    if (status != ErrorCodes::NamespaceExists) {
-        uassertStatusOK(status);
+    const auto swDocs = storage->findAllDocuments(opCtx, _ns);
+    if (swDocs == ErrorCodes::NamespaceNotFound) {
+        return;  // nothing to do for this service.
     }
-    const auto docs =
-        uassertStatusOK(storage->findAllDocuments(opCtx, _ns));  // todo safe to throw/uassert?
+    auto docs = uassertStatusOK(swDocs);  // todo safe to throw/uassert?
     const auto opTime =
         uassertStatusOK(ReplicationCoordinator::get(opCtx)->getLatestWriteOpTime(opCtx));
 
