@@ -97,42 +97,50 @@ PrimaryOnlyServiceGroup::PrimaryOnlyServiceGroup(NamespaceString ns,
       _constructExecutorFn(constructExecutorFn) {}
 
 void PrimaryOnlyServiceGroup::startup(long long term) {
+    invariant(!_term.is_initialized());
+    _term = term;
     _executor = _constructExecutorFn();
     _executor->startup();
 
     auto res = _executor->scheduleWork(
         [this, term](const mongo::executor::TaskExecutor::CallbackArgs& args) {
             uassertStatusOK(args.status);  // todo error handling
-            _startup(args.opCtx, term);
+            _startup(args.opCtx);
         });
     auto handle = uassertStatusOK(res);  // throw away handle, not needed.
 }
 
 void PrimaryOnlyServiceGroup::shutdown() {
+    invariant(_term.is_initialized());
+    _term.reset();
     _executor->shutdown();
     _executor.reset();
 }
 
+// todo concurrency
+void PrimaryOnlyServiceGroup::startNewInstance(const BSONObj& initialState,
+                                               const OpTime& initialOpTime) {
+    // todo log something.
+    _instances.push_back(_constructInstanceFn(_term, std::move(initialOpTime)));
+    _instances.back()->initialize(initialState);
 
-void PrimaryOnlyServiceGroup::_startup(OperationContext* opCtx, long long term) {
+    // start scheduling tasks to repeatedly call 'runOnce' on instances.
+    auto res =
+        _executor->scheduleWork([this, instance = _instances.back()](
+                                    const mongo::executor::TaskExecutor::CallbackArgs& args) {
+            _taskInstanceRunner(args, instance);
+        });
+    auto handle = uassertStatusOK(res);  // throw away handle, not needed. TODO error handling.
+}
+
+void PrimaryOnlyServiceGroup::_startup(OperationContext* opCtx) {
     auto storage = StorageInterface::get(opCtx);
     const auto docs =
         uassertStatusOK(storage->findAllDocuments(opCtx, _ns));  // todo safe to throw/uassert?
     const auto opTime =
         uassertStatusOK(ReplicationCoordinator::get(opCtx)->getLatestWriteOpTime(opCtx));
     for (const auto& doc : docs) {
-        std::cout << doc.toString() << std::endl;
-
-        _instances.push_back(_constructInstanceFn(term, std::move(opTime)));
-        _instances.back()->initialize(doc);
-
-        // start scheduling tasks to repeatedly call 'runOnce' on instances.
-        auto res =
-            _executor->scheduleWork([this, instance = _instances.back()](
-                                        const mongo::executor::TaskExecutor::CallbackArgs& args) {
-                _taskInstanceRunner(args, instance);
-            });
-        auto handle = uassertStatusOK(res);  // throw away handle, not needed. TODO error handling.
+        startNewInstance(doc, opTime);  // todo inlock
     }
 }
 

@@ -34,7 +34,9 @@
 #include "mongo/db/repl/optime.h"
 #include "mongo/executor/task_executor.h"
 #include "mongo/stdx/unordered_map.h"
+#include "mongo/util/concurrency/with_lock.h"
 
+#include <boost/optional.hpp>
 #include <functional>
 #include <memory>
 #include <vector>
@@ -52,7 +54,7 @@ public:
      * Must not block.
      * Throws on error.
      */
-    virtual void initialize(BSONObj state) = 0;
+    virtual void initialize(const BSONObj& state) = 0;
 
     /**
      * The XXXXX mechanism will call this repeatedly as long as this node remains primary in _term.
@@ -89,8 +91,12 @@ public:
 
     void shutdown();
 
+    void startNewInstance(const BSONObj& initialState, const OpTime& initialOpTime);
+
 private:
-    void _startup(OperationContext* opCtx, long long term);
+    void _startNewInstance(WithLock, const BSONObj& initialState, const OpTime& initialOpTime);
+
+    void _startup(OperationContext* opCtx);
 
     void _taskInstanceRunner(const mongo::executor::TaskExecutor::CallbackArgs& args,
                              std::shared_ptr<PrimaryOnlyServiceInstance> instance) noexcept;
@@ -103,6 +109,11 @@ private:
 
     // Function for constructing new a TaskExecutor for each term in which this node is primary.
     const ConstructExecutorFn _constructExecutorFn;
+
+    // TODO MUTEX
+
+    // 'none' when we're secondary, current term when we're primary.
+    boost::optional<long long> _term;
 
     std::unique_ptr<executor::TaskExecutor> _executor;
 

@@ -53,7 +53,7 @@ public:
         : PrimaryOnlyServiceInstance(term, std::move(opTime)) {}
     virtual ~TestService() = default;
 
-    void initialize(BSONObj state) final;
+    void initialize(const BSONObj& state) final;
 
     OpTime runOnceImpl(OperationContext* opCtx) final;
 

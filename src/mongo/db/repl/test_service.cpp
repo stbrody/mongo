@@ -81,13 +81,11 @@ std::unique_ptr<executor::TaskExecutor> TestService::makeTaskExecutor(
         std::move(pool), executor::makeNetworkInterface(networkName, nullptr, std::move(hookList)));
 }
 
-void TestService::initialize(BSONObj state) {
+void TestService::initialize(const BSONObj& state) {
     _state = TestStruct::parse(IDLParserErrorContext("parsing test type"), state);
 }
 
 OpTime TestService::runOnceImpl(OperationContext* opCtx) {
-    auto storage = StorageInterface::get(opCtx);
-
     auto newState = _state.getMyState();
     LOGV2(0, "####### state: {state}", "state"_attr = newState);
     switch (_state.getMyState()) {
@@ -109,6 +107,7 @@ OpTime TestService::runOnceImpl(OperationContext* opCtx) {
     TimestampedBSONObj update;
     update.obj = stateObj;
 
+    auto storage = StorageInterface::get(opCtx);
     uassertStatusOK(storage->updateSingleton(
         opCtx, NamespaceString("admin.myservice"), stateObj.getField("_id").wrap(), update));
 
@@ -141,7 +140,25 @@ public:
                      const std::string& ns,
                      const BSONObj& cmdObj,
                      BSONObjBuilder& result) {
-        // auto registry = PrimaryOnlyServiceRegistry::get(opCtx->getServiceContext());
+        auto registry = PrimaryOnlyServiceRegistry::get(opCtx->getServiceContext());
+        auto service = registry->lookupService(TestService::kServiceName);
+        invariant(service);
+
+        TestStruct initialState;
+        initialState.setMyState(TestServiceStateEnum::kStateFoo);
+
+        auto storage = StorageInterface::get(opCtx);
+        auto status = storage->createCollection(opCtx, TestService::ns(), CollectionOptions());
+        if (status != ErrorCodes::NamespaceExists) {
+            uassertStatusOK(status);
+        }
+
+        TimestampedBSONObj update;
+        update.obj = initialState.toBSON();
+        uassertStatusOK(storage->putSingleton(opCtx, TestService::ns(), update));
+
+        service->startNewInstance(update.obj,
+                                  ReplClientInfo::forClient(opCtx->getClient()).getLastOp());
         return true;
     }
 } pingCmd;
