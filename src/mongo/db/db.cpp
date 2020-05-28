@@ -947,6 +947,7 @@ auto makeReplicationExecutor(ServiceContext* serviceContext) {
         executor::makeNetworkInterface("ReplNetwork", nullptr, std::move(hookList)));
 }
 
+// TODO move this to a ConstructorActionRegisterer in the TestService file.
 void setUpPrimaryOnlyServices(ServiceContext* serviceContext) {
     auto registry = repl::PrimaryOnlyServiceRegistry::get(serviceContext);
 

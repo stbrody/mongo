@@ -1488,8 +1488,8 @@ env.Library(
     ],
     LIBDEPS=[
         '$BUILD_DIR/mongo/base',
-        '$BUILD_DIR/mongo/idl/idl_parser',
         '$BUILD_DIR/mongo/db/rw_concern_d',
+        '$BUILD_DIR/mongo/executor/task_executor_interface',
         'repl_coordinator_interface',
         'storage_interface',
     ],
@@ -1503,7 +1503,7 @@ env.Library(
     ],
     LIBDEPS=[
         '$BUILD_DIR/mongo/base',
-        '$BUILD_DIR/mongo/executor/task_executor_interface',
+        '$BUILD_DIR/mongo/idl/idl_parser',
         'primary_only_service',
         'storage_interface',
     ],
