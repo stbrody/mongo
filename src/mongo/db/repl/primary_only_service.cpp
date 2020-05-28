@@ -47,6 +47,7 @@
 #include "mongo/db/write_concern.h"
 #include "mongo/executor/task_executor.h"
 #include "mongo/logv2/log.h"
+#include "mongo/platform/mutex.h"
 #include "mongo/stdx/unordered_map.h"
 #include "mongo/util/assert_util.h"
 
@@ -117,10 +118,19 @@ void PrimaryOnlyServiceGroup::shutdown() {
     _executor.reset();
 }
 
-// todo concurrency
 void PrimaryOnlyServiceGroup::startNewInstance(BSONObj initialState, OpTime initialOpTime) {
-    // todo log something.
-    // todo check term to see that we're still primary and handle if not.
+    stdx::lock_guard<Latch> lk(_mutex);
+    _startNewInstance(lk, std::move(initialState), std::move(initialOpTime));
+}
+
+void PrimaryOnlyServiceGroup::_startNewInstance(WithLock lk,
+                                                BSONObj initialState,
+                                                OpTime initialOpTime) {
+    uassert(ErrorCodes::NotMaster,
+            "Not primary while attempting to start a primary only service",
+            _term.is_initialized());
+
+    LOGV2(0, "Starting new instance of primary only service: ");  // TODO log service name.
     _instances.push_back(_constructInstanceFn(*_term, std::move(initialOpTime)));
     _instances.back()->initialize(std::move(initialState));
 
@@ -139,8 +149,10 @@ void PrimaryOnlyServiceGroup::_startup(OperationContext* opCtx) {
         uassertStatusOK(storage->findAllDocuments(opCtx, _ns));  // todo safe to throw/uassert?
     const auto opTime =
         uassertStatusOK(ReplicationCoordinator::get(opCtx)->getLatestWriteOpTime(opCtx));
+
+    stdx::lock_guard<Latch> lk(_mutex);
     for (const auto& doc : docs) {
-        startNewInstance(doc, opTime);  // todo inlock
+        _startNewInstance(lk, doc, opTime);
     }
 }
 

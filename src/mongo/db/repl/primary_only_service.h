@@ -33,6 +33,7 @@
 #include "mongo/db/operation_context.h"
 #include "mongo/db/repl/optime.h"
 #include "mongo/executor/task_executor.h"
+#include "mongo/platform/mutex.h"
 #include "mongo/stdx/unordered_map.h"
 #include "mongo/util/concurrency/with_lock.h"
 
@@ -110,7 +111,7 @@ private:
     // Function for constructing new a TaskExecutor for each term in which this node is primary.
     const ConstructExecutorFn _constructExecutorFn;
 
-    // TODO MUTEX
+    Mutex _mutex = MONGO_MAKE_LATCH("PrimaryOnlyServiceGroup::_mutex");
 
     // 'none' when we're secondary, current term when we're primary.
     boost::optional<long long> _term;
