@@ -47,6 +47,7 @@
 #include "mongo/db/write_concern.h"
 #include "mongo/executor/task_executor.h"
 #include "mongo/logv2/log.h"
+#include "mongo/stdx/unordered_map.h"
 #include "mongo/util/assert_util.h"
 
 namespace mongo {
@@ -61,6 +62,31 @@ const auto registryDecoration = ServiceContext::declareDecoration<PrimaryOnlySer
 
 PrimaryOnlyServiceRegistry* PrimaryOnlyServiceRegistry::get(ServiceContext* serviceContext) {
     return &registryDecoration(serviceContext);
+}
+
+void PrimaryOnlyServiceRegistry::onStepUp(long long term) {
+    for (auto& service : _services) {
+        service.second->startup(term);
+    }
+}
+
+void PrimaryOnlyServiceRegistry::onStepDown() {
+    for (auto& service : _services) {
+        service.second->shutdown();
+    }
+}
+
+void PrimaryOnlyServiceRegistry::registerServiceGroup(
+    std::string serviceName, std::unique_ptr<PrimaryOnlyServiceGroup> service) {
+    _services.emplace(std::move(serviceName), std::move(service));
+}
+
+PrimaryOnlyServiceGroup* PrimaryOnlyServiceRegistry::lookupService(StringData serviceName) {
+    auto it = _services.find(serviceName.toString());
+    invariant(it != _services.end());
+    auto servicePtr = it->second.get();
+    invariant(servicePtr);
+    return servicePtr;
 }
 
 PrimaryOnlyServiceGroup::PrimaryOnlyServiceGroup(NamespaceString ns,

@@ -41,6 +41,8 @@ namespace repl {
 
 class TestService : public PrimaryOnlyServiceInstance {
 public:
+    static const std::string kServiceName;
+
     static NamespaceString ns() {
         return NamespaceString{"admin.test_service"};
     }
@@ -56,7 +58,7 @@ public:
     OpTime runOnceImpl(OperationContext* opCtx) final;
 
 private:
-    TestStruct myStateStruct;
+    TestStruct _state;
 };
 
 }  // namespace repl

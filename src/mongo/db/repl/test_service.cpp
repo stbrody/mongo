@@ -54,6 +54,9 @@
 
 namespace mongo {
 namespace repl {
+
+const std::string TestService::kServiceName = "testService";
+
 namespace {
 const std::string kThreadNamePrefix = "TestServiceThread-";
 const std::string kPoolName = "TestServiceThreadPool";
@@ -79,14 +82,15 @@ std::unique_ptr<executor::TaskExecutor> TestService::makeTaskExecutor(
 }
 
 void TestService::initialize(BSONObj state) {
-    myStateStruct = TestStruct::parse(IDLParserErrorContext("parsing test type"), state);
+    _state = TestStruct::parse(IDLParserErrorContext("parsing test type"), state);
 }
 
 OpTime TestService::runOnceImpl(OperationContext* opCtx) {
     auto storage = StorageInterface::get(opCtx);
 
-    auto newState = myStateStruct.getMyState();
-    switch (myStateStruct.getMyState()) {
+    auto newState = _state.getMyState();
+    LOGV2(0, "####### state: {state}", "state"_attr = newState);
+    switch (_state.getMyState()) {
         case TestServiceStateEnum::kStateFoo:
             newState = TestServiceStateEnum::kStateBar;
             break;
@@ -97,9 +101,11 @@ OpTime TestService::runOnceImpl(OperationContext* opCtx) {
             newState = TestServiceStateEnum::kStateFoo;
             break;
     }
-    myStateStruct.setMyState(newState);
+    _state.setMyState(newState);
 
-    BSONObj stateObj = myStateStruct.toBSON();
+    sleepmillis(1000);
+
+    BSONObj stateObj = _state.toBSON();
     TimestampedBSONObj update;
     update.obj = stateObj;
 
@@ -135,6 +141,7 @@ public:
                      const std::string& ns,
                      const BSONObj& cmdObj,
                      BSONObjBuilder& result) {
+        // auto registry = PrimaryOnlyServiceRegistry::get(opCtx->getServiceContext());
         return true;
     }
 } pingCmd;

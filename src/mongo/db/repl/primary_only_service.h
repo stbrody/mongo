@@ -33,6 +33,7 @@
 #include "mongo/db/operation_context.h"
 #include "mongo/db/repl/optime.h"
 #include "mongo/executor/task_executor.h"
+#include "mongo/stdx/unordered_map.h"
 
 #include <functional>
 #include <memory>
@@ -117,24 +118,18 @@ public:
     /**
      * Iterates over all registered services and starts them up.
      */
-    void onStepUp(long long term) {
-        for (auto& service : _services) {
-            service->startup(term);
-        }
-    }
+    void onStepUp(long long term);
 
-    void onStepDown() {
-        for (auto& service : _services) {
-            service->shutdown();
-        }
-    }
+    void onStepDown();
 
-    void registerServiceGroup(std::unique_ptr<PrimaryOnlyServiceGroup> service) {
-        _services.push_back(std::move(service));
-    }
+    void registerServiceGroup(std::string serviceName,
+                              std::unique_ptr<PrimaryOnlyServiceGroup> service);
+
+    PrimaryOnlyServiceGroup* lookupService(StringData serviceName);
 
 private:
-    std::vector<std::unique_ptr<PrimaryOnlyServiceGroup>> _services;
+    // todo use fast string map
+    stdx::unordered_map<std::string, std::unique_ptr<PrimaryOnlyServiceGroup>> _services;
 };
 
 }  // namespace repl

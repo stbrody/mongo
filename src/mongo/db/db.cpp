@@ -958,7 +958,7 @@ void setUpPrimaryOnlyServices(ServiceContext* serviceContext) {
         },
         [serviceContext]() { return repl::TestService::makeTaskExecutor(serviceContext); });
 
-    registry->registerServiceGroup(std::move(group));
+    registry->registerServiceGroup(repl::TestService::kServiceName, std::move(group));
 }
 
 void setUpReplication(ServiceContext* serviceContext) {
