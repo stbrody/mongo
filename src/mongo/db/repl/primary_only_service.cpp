@@ -180,7 +180,6 @@ bool isExpected(Status status) {
 void PrimaryOnlyServiceGroup::_taskInstanceRunner(
     const mongo::executor::TaskExecutor::CallbackArgs& args,
     std::shared_ptr<PrimaryOnlyServiceInstance> instance) noexcept {
-    LOGV2(0, "RUNNING ONE INSTANCE");
     if (!args.status.isOK()) {
         if (isExpected(args.status)) {
             LOGV2_DEBUG(0,
@@ -188,7 +187,6 @@ void PrimaryOnlyServiceGroup::_taskInstanceRunner(
                         "Received expected error in primary-only service, indicating stepdown or "
                         "shutdown: {error}",
                         "error"_attr = args.status);
-            LOGV2(0, "##### STOPPING SERVICE1");
             return;
         }
         LOGV2_FATAL(0,
@@ -196,7 +194,6 @@ void PrimaryOnlyServiceGroup::_taskInstanceRunner(
                     "status"_attr = args.status);
         return;  // unreachable
     }
-    LOGV2(0, "GOT PAST CALLBACK CANCELLED CHECK");
 
     auto opCtx = cc().makeOperationContext();
     auto replCoord = ReplicationCoordinator::get(opCtx.get());
@@ -209,7 +206,6 @@ void PrimaryOnlyServiceGroup::_taskInstanceRunner(
             "No longer primary while running primary only service. {currentTerm}, {expectedTerm}",
             "currentTerm"_attr = replCoord->getTerm(),
             "expectedTerm"_attr = instance->getTerm());
-        LOGV2(0, "##### STOPPING SERVICE2");
         return;
     }
 
@@ -222,7 +218,6 @@ void PrimaryOnlyServiceGroup::_taskInstanceRunner(
                         0,  // 2
                         "got error that's expected during stepdown. {status}",
                         "status"_attr = e.toStatus());
-            LOGV2(0, "##### STOPPING SERVICE3");
             return;
         }
         LOGV2_DEBUG(0,
@@ -244,7 +239,6 @@ void PrimaryOnlyServiceGroup::_taskInstanceRunner(
                         0,  // 2
                         "got error that's expected during stepdown. {status}",
                         "status"_attr = res.getStatus());
-            LOGV2(0, "##### STOPPING SERVICE4");
             return;
         }
     }
