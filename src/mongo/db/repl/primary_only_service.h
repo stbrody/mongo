@@ -62,10 +62,11 @@ public:
     virtual void initialize(const BSONObj& state) = 0;
 
     /**
-     * The XXXXX mechanism will call this repeatedly as long as this node remains primary in _term.
+     * The PrimaryOnlyServiceGroup mechanism will call this repeatedly as long as this node remains
+     * primary in _term.
      * Can block and do disk AND network i/o.
      * Is responsible for persisting any state needed so that its work can be resumed if it is
-     * killed and restarted as a new instance.  Returns the OpTime that must be visible for
+     * killed and restarted as a new instance. Returns the OpTime that must be visible for
      * subsequent calls to startup with a 'state' object read at that optime to resume this work.
      * Throws on error.
      */
@@ -79,7 +80,6 @@ protected:
     OpTime _opTime;  // todo comment
 };
 
-// TODO how do you start a new instance on the fly?
 class PrimaryOnlyServiceGroup {
 private:
     using ConstructExecutorFn = std::function<std::unique_ptr<executor::TaskExecutor>()>;
@@ -92,10 +92,13 @@ public:
                             ConstructExecutorFn constructExecutorFn);
     virtual ~PrimaryOnlyServiceGroup() = default;
 
+    // starts up existing instances based on their state documents from _ns
     void startup(long long term);
 
     void shutdown();
 
+    // starts a brand new instance, given the existing initialState document, which must *already*
+    // be persisted in _ns and visible at or after 'initialOpTime'.
     void startNewInstance(BSONObj initialState, OpTime initialOpTime);
 
 private:
