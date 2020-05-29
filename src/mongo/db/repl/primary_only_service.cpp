@@ -115,15 +115,13 @@ void PrimaryOnlyServiceGroup::startup(long long term) {
 }
 
 void PrimaryOnlyServiceGroup::shutdown() {
-    stdx::lock_guard<Latch> lk(_mutex);
-    invariant(_term.is_initialized());
-    _term.reset();
     LOGV2(0, "##### STOPPING SERVICE");
-    _executor->shutdown();
-    LOGV2(0, "##### JOINING SERVICE");
-    _executor->join();
-    LOGV2(0, "##### SERVICE STOPPED!!!!!!");
-    _executor.reset();
+
+    stdx::lock_guard<Latch> lk(_mutex);
+    _term.reset();
+    if (_executor) {
+        _executor->shutdown();
+    }
 }
 
 void PrimaryOnlyServiceGroup::startNewInstance(BSONObj initialState, OpTime initialOpTime) {
