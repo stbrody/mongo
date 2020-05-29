@@ -72,6 +72,9 @@ std::unique_ptr<executor::TaskExecutor> TestService::makeTaskExecutor(
     threadPoolOptions.onCreateThread = [](const std::string& threadName) {
         Client::initThread(threadName.c_str());
         AuthorizationSession::get(cc())->grantInternalAuthorization(&cc());
+
+        stdx::lock_guard<Client> lk(cc());
+        cc().setSystemOperationKillable(lk);
     };
     auto pool = std::make_unique<ThreadPool>(threadPoolOptions);
 
