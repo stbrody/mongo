@@ -1505,6 +1505,7 @@ env.Library(
     LIBDEPS=[
         '$BUILD_DIR/mongo/base',
         '$BUILD_DIR/mongo/db/commands',
+        '$BUILD_DIR/mongo/executor/thread_pool_task_executor',
         '$BUILD_DIR/mongo/idl/idl_parser',
         'primary_only_service',
         'storage_interface',
