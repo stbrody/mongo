@@ -380,6 +380,9 @@ void ReplicationCoordinatorExternalStateImpl::clearAppliedThroughIfCleanShutdown
 }
 
 void ReplicationCoordinatorExternalStateImpl::shutdown(OperationContext* opCtx) {
+    // todo should this be the whole onStepdownHook?
+    PrimaryOnlyServiceRegistry::get(_service)->onStepDown();
+
     stdx::unique_lock<Latch> lk(_threadMutex);
     _inShutdown = true;
     if (!_startedThreads) {
