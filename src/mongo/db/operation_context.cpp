@@ -48,11 +48,11 @@
 
 namespace mongo {
 
-namespace {
-
 MONGO_FAIL_POINT_DEFINE(maxTimeAlwaysTimeOut);
 
 MONGO_FAIL_POINT_DEFINE(maxTimeNeverTimeOut);
+
+namespace {
 
 // Enabling the checkForInterruptFail fail point will start a game of random chance on the
 // connection specified in the fail point data, generating an interrupt with a given fixed
