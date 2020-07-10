@@ -772,7 +772,7 @@ void NetworkInterfaceTL::RequestManager::trySend(
 
     if (request->timeout != RemoteCommandRequest::kNoTimeout &&
         WireSpec::instance().isInternalClient) {
-        LOGV2_DEBUG(47429002,
+        LOGV2_DEBUG(4924402,
                     2,
                     "Set maxTimeMSOpOnly for request",
                     "maxTimeMSOpOnly"_attr = request->timeout,
