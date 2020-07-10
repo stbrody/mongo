@@ -11,6 +11,7 @@ selector:
   - need_fixing_for_46
   exclude_files:
   # Enable when 4.6 becomes last stable
+  - jstests/sharding/query/merge_command_options.js
   - jstests/sharding/max_time_ms_enforced_on_shard.js
   # TODO SERVER-46040: Enable when SERVER-46040 is backported
   - jstests/sharding/drop_indexes_with_stale_config_error.js

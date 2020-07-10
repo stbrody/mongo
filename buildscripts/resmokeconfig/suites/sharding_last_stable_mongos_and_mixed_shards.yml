@@ -31,6 +31,7 @@ selector:
   - jstests/sharding/kill_pinned_cursor.js
   - jstests/sharding/killop.js
   # Enable when 4.6 becomes last stable
+  - jstests/sharding/query/merge_command_options.js
   - jstests/sharding/max_time_ms_enforced_on_shard.js
   - jstests/sharding/mongos_dataSize.js
   # Enable when SERVER-44733 is backported
