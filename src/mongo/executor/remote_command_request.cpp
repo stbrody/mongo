@@ -94,7 +94,7 @@ void RemoteCommandRequestBase::_updateTimeoutFromOpCtxDeadline(const OperationCo
         timeout = opCtxTimeout;
         timeoutCode = opCtx->getTimeoutError();
 
-        if (opCtx->maxTimeNeverTimeOutFailpointIsActive()) {
+        if (MONGO_unlikely(maxTimeNeverTimeOut.shouldFail())) {
             // If a mongod or mongos receives a request with a 'maxTimeMS', but the
             // 'maxTimeNeverTimeOut' failpoint is enabled, that server process should not enforce
             // the deadline locally, but should still pass the remaining deadline on to any other

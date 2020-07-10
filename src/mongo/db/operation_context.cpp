@@ -49,17 +49,9 @@
 namespace mongo {
 
 namespace {
-// Enabling the maxTimeAlwaysTimeOut fail point will cause any query or command run with a
-// valid non-zero max time to fail immediately.  Any getmore operation on a cursor already
-// created with a valid non-zero max time will also fail immediately.
-//
-// This fail point cannot be used with the maxTimeNeverTimeOut fail point.
+
 MONGO_FAIL_POINT_DEFINE(maxTimeAlwaysTimeOut);
 
-// Enabling the maxTimeNeverTimeOut fail point will cause the server to never time out any
-// query, command, or getmore operation, regardless of whether a max time is set.
-//
-// This fail point cannot be used with the maxTimeAlwaysTimeOut fail point.
 MONGO_FAIL_POINT_DEFINE(maxTimeNeverTimeOut);
 
 // Enabling the checkForInterruptFail fail point will start a game of random chance on the
@@ -138,10 +130,6 @@ void OperationContext::setDeadlineAfterNowBy(Microseconds maxTime, ErrorCodes::E
         }
     }
     setDeadlineAndMaxTime(when, maxTime, timeoutError);
-}
-
-bool OperationContext::maxTimeNeverTimeOutFailpointIsActive() const {
-    return maxTimeNeverTimeOut.shouldFail();
 }
 
 bool OperationContext::hasDeadlineExpired() const {

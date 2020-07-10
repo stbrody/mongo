@@ -47,12 +47,6 @@
 
 namespace mongo {
 
-// A constant by which 'maxTimeMSOpOnly' values are allowed to exceed the max allowed value for
-// 'maxTimeMS'.  This is because mongod and mongos server processes add a small amount to the
-// 'maxTimeMS' value they are given before passing it on as 'maxTimeMSOpOnly', to allow for clock
-// precision.
-const long long kMaxTimeMSOpOnlyMaxPadding = 100;
-
 namespace {
 
 Status checkFieldType(const BSONElement& el, BSONType type) {
