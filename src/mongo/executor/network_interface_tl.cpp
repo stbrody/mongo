@@ -745,7 +745,7 @@ void NetworkInterfaceTL::RequestManager::trySend(
                 "requestId"_attr = cmdState->requestOnAny.id,
                 "target"_attr = cmdState->requestOnAny.target[idx]);
 
-    auto request = requestState->request;
+    auto request = &requestState->request.get();
 
     if (requestState->isHedge) {
         invariant(request->hedgeOptions);
