@@ -40,6 +40,7 @@
 #include "mongo/db/service_context_d_test_fixture.h"
 #include "mongo/unittest/death_test.h"
 #include "mongo/unittest/unittest.h"
+#include "mongo/util/fail_point.h"
 #include "mongo/util/future.h"
 
 using namespace mongo;
@@ -47,8 +48,21 @@ using namespace mongo::repl;
 
 constexpr StringData kTestServiceName = "TestService"_sd;
 
+MONGO_FAIL_POINT_DEFINE(TestServiceHangBeforeStateOne);
+MONGO_FAIL_POINT_DEFINE(TestServiceHangBeforeStateTwo);
+MONGO_FAIL_POINT_DEFINE(TestServiceHangBeforeStateThree);
+MONGO_FAIL_POINT_DEFINE(TestServiceHangBeforeCompletion);
+
 class TestService final : public PrimaryOnlyService {
 public:
+    enum class State {
+        initializing = 0,
+        one = 1,
+        two = 2,
+        three = 3,
+        done = 4,
+    };
+
     explicit TestService(ServiceContext* serviceContext) : PrimaryOnlyService(serviceContext) {}
     ~TestService() = default;
 
@@ -61,30 +75,96 @@ public:
     }
 
     std::shared_ptr<PrimaryOnlyService::Instance> constructInstance(
-        const BSONObj& initialState) const override {
-        return std::make_shared<TestService::Instance>(initialState);
+        BSONObj initialState) const override {
+        return std::make_shared<TestService::Instance>(std::move(initialState));
     }
 
     class Instance final : public PrimaryOnlyService::TypedInstance<Instance> {
     public:
-        Instance(const BSONObj& state)
-            : PrimaryOnlyService::TypedInstance<Instance>(), _state(state) {}
+        explicit Instance(BSONObj stateDoc)
+            : PrimaryOnlyService::TypedInstance<Instance>(),
+              _id(stateDoc["_id"].wrap().getOwned()),
+              _stateDoc(std::move(stateDoc)),
+              _state((State)_stateDoc["state"].Int()) {}
 
         void run(std::shared_ptr<executor::ScopedTaskExecutor> executor) noexcept override {
-            _completionPromise.emplaceValue();
+            SemiFuture<void>::makeReady()
+                .thenRunOn(**executor)
+                .then([this] {
+                    if (MONGO_unlikely(TestServiceHangBeforeStateOne.shouldFail())) {
+                        TestServiceHangBeforeStateOne.pauseWhileSet();
+                    }
+                    _runOnce(State::initializing, State::one);
+                })
+                .then([this] {
+                    if (MONGO_unlikely(TestServiceHangBeforeStateTwo.shouldFail())) {
+                        TestServiceHangBeforeStateTwo.pauseWhileSet();
+                    }
+                    _runOnce(State::one, State::two);
+                })
+                .then([this] {
+                    if (MONGO_unlikely(TestServiceHangBeforeStateThree.shouldFail())) {
+                        TestServiceHangBeforeStateThree.pauseWhileSet();
+                    }
+                    _runOnce(State::two, State::three);
+                })
+                .then([this] {
+                    if (MONGO_unlikely(TestServiceHangBeforeCompletion.shouldFail())) {
+                        TestServiceHangBeforeCompletion.pauseWhileSet();
+                    }
+                    _runOnce(State::three, State::done);
+                })
+                .getAsync([this](auto) { _completionPromise.emplaceValue(); });
         }
 
         void waitForCompletion() {
             _completionPromise.getFuture().wait();
         }
 
-        const BSONObj& getState() const {
-            return _state;
+        int getState() {
+            stdx::lock_guard lk(_mutex);
+            return (int)_state;
+        }
+
+        int getID() {
+            stdx::lock_guard lk(_mutex);
+            return _id["_id"].Int();
         }
 
     private:
-        BSONObj _state;
+        void _runOnce(State currentState, State newState) {
+            stdx::unique_lock lk(_mutex);
+            if (_state > currentState) {
+                invariant(_state != State::done);
+                return;
+            }
+            invariant(_state == currentState);
+
+            BSONObj newStateDoc = ([&] {
+                BSONObjBuilder newStateDoc;
+                newStateDoc.appendElements(_id);
+                newStateDoc.append("state", (int)newState);
+                return newStateDoc.done().getOwned();
+            })();
+            _stateDoc = newStateDoc;
+            _state = newState;
+
+            lk.unlock();
+
+            auto opCtx = cc().makeOperationContext();
+            DBDirectClient client(opCtx.get());
+            if (newState == State::done) {
+                client.remove("admin.test_service", _id);
+            } else {
+                client.update("admin.test_service", _id, newStateDoc, true);
+            }
+        }
+
+        const InstanceID _id;
+        BSONObj _stateDoc;
+        State _state = State::initializing;
         SharedPromise<void> _completionPromise;
+        Mutex _mutex = MONGO_MAKE_LATCH("PrimaryOnlyServiceTest::TestService::_mutex");
     };
 };
 
@@ -101,6 +181,8 @@ public:
             auto replCoord = std::make_unique<ReplicationCoordinatorMock>(serviceContext);
             ASSERT_OK(replCoord->setFollowerMode(MemberState::RS_PRIMARY));
             ASSERT_OK(replCoord->updateTerm(opCtx.get(), 1));
+            replCoord->setMyLastAppliedOpTimeAndWallTime(
+                OpTimeAndWallTime(OpTime(Timestamp(1, 1), 1), Date_t()));
             ReplicationCoordinator::set(serviceContext, std::move(replCoord));
 
             repl::setOplogCollectionName(serviceContext);
@@ -119,7 +201,7 @@ public:
 
             _registry->registerService(std::move(service));
             _registry->onStartup(opCtx.get());
-            _registry->onStepUpComplete(nullptr, 1);
+            _registry->onStepUpComplete(opCtx.get(), 1);
         }
 
         _service = _registry->lookupService("TestService");
@@ -127,11 +209,11 @@ public:
     }
 
     void tearDown() override {
+        WaitForMajorityService::get(getServiceContext()).shutDown();
+
         _registry->shutdown();
         _registry.reset();
         _service = nullptr;
-
-        WaitForMajorityService::get(getServiceContext()).shutDown();
 
         ServiceContextMongoDTest::tearDown();
     }
@@ -154,55 +236,53 @@ DEATH_TEST_F(PrimaryOnlyServiceTest,
 }
 
 TEST_F(PrimaryOnlyServiceTest, BasicCreateInstance) {
-    auto instance = TestService::Instance::getOrCreate(_service,
-                                                       BSON("_id" << 0 << "state"
-                                                                  << "foo"));
+    auto instance = TestService::Instance::getOrCreate(_service, BSON("_id" << 0 << "state" << 0));
     ASSERT(instance.get());
-    ASSERT_EQ(0, instance->getState()["_id"].Int());
-    ASSERT_EQ("foo", instance->getState()["state"].String());
+    ASSERT_EQ(0, instance->getID());
+
+    auto instance2 = TestService::Instance::getOrCreate(_service, BSON("_id" << 1 << "state" << 0));
+    ASSERT(instance2.get());
+    ASSERT_EQ(1, instance2->getID());
+
     instance->waitForCompletion();
+    ASSERT_EQ(4, instance->getState());
+
+    instance2->waitForCompletion();
+    ASSERT_EQ(4, instance2->getState());
 }
 
 TEST_F(PrimaryOnlyServiceTest, LookupInstance) {
-    auto instance = TestService::Instance::getOrCreate(_service,
-                                                       BSON("_id" << 0 << "state"
-                                                                  << "foo"));
+    auto instance = TestService::Instance::getOrCreate(_service, BSON("_id" << 0 << "state" << 0));
     ASSERT(instance.get());
-    ASSERT_EQ(0, instance->getState()["_id"].Int());
-    ASSERT_EQ("foo", instance->getState()["state"].String());
+    ASSERT_EQ(0, instance->getID());
 
     auto instance2 = TestService::Instance::lookup(_service, BSON("_id" << 0));
 
     ASSERT(instance2.get());
     ASSERT_EQ(instance.get(), instance2.get().get());
-    ASSERT_EQ(0, instance2.get()->getState()["_id"].Int());
-    ASSERT_EQ("foo", instance2.get()->getState()["state"].String());
 }
 
 TEST_F(PrimaryOnlyServiceTest, DoubleCreateInstance) {
-    auto instance = TestService::Instance::getOrCreate(_service,
-                                                       BSON("_id" << 0 << "state"
-                                                                  << "foo"));
+    auto instance = TestService::Instance::getOrCreate(_service, BSON("_id" << 0 << "state" << 0));
     ASSERT(instance.get());
-    ASSERT_EQ(0, instance->getState()["_id"].Int());
-    ASSERT_EQ("foo", instance->getState()["state"].String());
+    ASSERT_EQ(0, instance->getID());
 
     // Trying to create a new instance with the same _id but different state otherwise just returns
     // the already existing instance based on the _id only.
-    auto instance2 = TestService::Instance::getOrCreate(_service,
-                                                        BSON("_id" << 0 << "state"
-                                                                   << "bar"));
+    auto instance2 = TestService::Instance::getOrCreate(_service, BSON("_id" << 0 << "state" << 1));
     ASSERT_EQ(instance.get(), instance2.get());
-    ASSERT_EQ(0, instance2->getState()["_id"].Int());
-    ASSERT_EQ("foo", instance2->getState()["state"].String());
 }
 
 TEST_F(PrimaryOnlyServiceTest, CreateWhenNotPrimary) {
     _registry->onStepDown();
 
-    ASSERT_THROWS_CODE(TestService::Instance::getOrCreate(_service,
-                                                          BSON("_id" << 0 << "state"
-                                                                     << "foo")),
-                       DBException,
-                       ErrorCodes::NotMaster);
+    ASSERT_THROWS_CODE(
+        TestService::Instance::getOrCreate(_service, BSON("_id" << 0 << "state" << 0)),
+        DBException,
+        ErrorCodes::NotMaster);
+}
+
+TEST_F(PrimaryOnlyServiceTest, CreateWithoutID) {
+    ASSERT_THROWS_CODE(
+        TestService::Instance::getOrCreate(_service, BSON("state" << 0)), DBException, 4908702);
 }

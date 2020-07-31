@@ -42,6 +42,7 @@
 #include "mongo/db/ops/write_ops.h"
 #include "mongo/db/repl/repl_client_info.h"
 #include "mongo/db/repl/replica_set_aware_service.h"
+#include "mongo/db/repl/replication_coordinator.h"
 #include "mongo/db/repl/wait_for_majority_service.h"
 #include "mongo/db/service_context.h"
 #include "mongo/executor/network_connection_hook.h"
@@ -67,27 +68,6 @@ const auto _registryRegisterer =
 
 const Status kExecutorShutdownStatus(ErrorCodes::InterruptedDueToReplStateChange,
                                      "PrimaryOnlyService executor shut down due to stepDown");
-
-// Throws on error.
-void insertDocument(OperationContext* opCtx,
-                    const NamespaceString& collectionName,
-                    const BSONObj& document) {
-    DBDirectClient client(opCtx);
-
-    BSONObj res;
-    client.runCommand(collectionName.db().toString(),
-                      [&] {
-                          write_ops::Insert insertOp(collectionName);
-                          insertOp.setDocuments({document});
-                          return insertOp.toBSON({});
-                      }(),
-                      res);
-
-    BatchedCommandResponse response;
-    std::string errmsg;
-    invariant(response.parseBSON(res, &errmsg));
-    uassertStatusOK(response.toStatus());
-}
 }  // namespace
 
 PrimaryOnlyServiceRegistry* PrimaryOnlyServiceRegistry::get(ServiceContext* serviceContext) {
@@ -115,9 +95,12 @@ void PrimaryOnlyServiceRegistry::onStartup(OperationContext* opCtx) {
     }
 }
 
-void PrimaryOnlyServiceRegistry::onStepUpComplete(OperationContext*, long long term) {
+void PrimaryOnlyServiceRegistry::onStepUpComplete(OperationContext* opCtx, long long term) {
+    const auto stepUpOpTime = ReplicationCoordinator::get(opCtx)->getMyLastAppliedOpTime();
+    invariant(term == stepUpOpTime.getTerm());
+
     for (auto& service : _services) {
-        service.second->onStepUp(term);
+        service.second->onStepUp(stepUpOpTime);
     }
 }
 
@@ -153,16 +136,17 @@ void PrimaryOnlyService::startup(OperationContext* opCtx) {
     _executor->startup();
 }
 
-void PrimaryOnlyService::onStepUp(long long term) {
+void PrimaryOnlyService::onStepUp(const OpTime& stepUpOpTime) {
     InstanceMap savedInstances;
     auto newThenOldScopedExecutor =
         std::make_shared<executor::ScopedTaskExecutor>(_executor, kExecutorShutdownStatus);
     {
         stdx::lock_guard lk(_mutex);
 
-        invariant(term > _term,
-                  str::stream() << "term " << term << " is not greater than " << _term);
-        _term = term;
+        auto newTerm = stepUpOpTime.getTerm();
+        invariant(newTerm > _term,
+                  str::stream() << "term " << newTerm << " is not greater than " << _term);
+        _term = newTerm;
         _state = State::kRunning;
 
         // Install a new executor, while moving the old one into 'newThenOldScopedExecutor' so it
@@ -179,6 +163,16 @@ void PrimaryOnlyService::onStepUp(long long term) {
         // Shutdown happens in onStepDown of previous term, so we only need to join() here.
         (*newThenOldScopedExecutor)->join();
     }
+
+    // Now wait for the first write of the new term to be majority committed, so that we know all
+    // previous writes to state documents are also committed, and then schedule work to rebuild
+    // Instances from their persisted state documents.
+    stdx::lock_guard lk(_mutex);
+    WaitForMajorityService::get(_serviceContext)
+        .waitUntilMajority(stepUpOpTime)
+        .thenRunOn(**_scopedExecutor)
+        .then([this] { _rebuildInstances(); })
+        .getAsync([](auto) {});  // Ignore the result Future
 }
 
 void PrimaryOnlyService::onStepDown() {
@@ -235,8 +229,8 @@ std::shared_ptr<PrimaryOnlyService::Instance> PrimaryOnlyService::getOrCreateIns
     if (it != _instances.end()) {
         return it->second;
     }
-    auto [it2, inserted] =
-        _instances.emplace(instanceID.getOwned(), constructInstance(std::move(initialState)));
+    auto [it2, inserted] = _instances.emplace(std::move(instanceID).getOwned(),
+                                              constructInstance(std::move(initialState)));
     invariant(inserted);
 
     // Kick off async work to run the instance
@@ -255,6 +249,53 @@ boost::optional<std::shared_ptr<PrimaryOnlyService::Instance>> PrimaryOnlyServic
     }
 
     return it->second;
+}
+
+void PrimaryOnlyService::_rebuildInstances() noexcept {
+    std::vector<BSONObj> stateDocuments;
+    {
+        auto opCtx = cc().makeOperationContext();
+        DBDirectClient client(opCtx.get());
+        try {
+            client.findN(stateDocuments, getStateDocumentsNS().toString(), Query(), 0);
+        } catch (const DBException& e) {
+            LOGV2_ERROR(0,
+                        "Failed to start PrimaryOnlyService {service} because the query on {ns} "
+                        "for state documents failed due to {error}",
+                        "ns"_attr = getStateDocumentsNS(),
+                        "service"_attr = getServiceName(),
+                        "error"_attr = e);
+            return;
+        }
+    }
+
+    stdx::lock_guard lk(_mutex);
+    for (auto&& doc : stateDocuments) {
+        auto idElem = doc["_id"];
+        if (idElem.eoo()) {
+            LOGV2_WARNING(
+                0,
+                "Missing _id element when parsing state document for PrimaryOnlyService {service}. "
+                "Skipping creating an Instance for state document: {stateDoc}",
+                "service"_attr = getServiceName(),
+                "stateDoc"_attr = doc);
+            continue;
+        }
+        auto instanceID = idElem.wrap().getOwned();
+        auto instance = constructInstance(std::move(doc));
+
+        auto [_, inserted] = _instances.emplace(instanceID, instance);
+        if (!inserted) {
+            LOGV2_WARNING(0,
+                          "Instance with ID {instanceID} already exists when reloading state for "
+                          "PrimaryOnlyService {service} from {ns} during stepUp",
+                          "instanceID"_attr = instanceID,
+                          "service"_attr = getServiceName(),
+                          "ns"_attr = getServiceName());
+            continue;
+        }
+        instance->scheduleRun(_scopedExecutor);
+    }
 }
 
 void PrimaryOnlyService::Instance::scheduleRun(
