@@ -262,7 +262,7 @@ void PrimaryOnlyService::_rebuildInstances() noexcept {
                 stateDocuments.push_back(cursor->nextSafe().getOwned());
             }
         } catch (const DBException& e) {
-            LOGV2_ERROR(0,
+            LOGV2_ERROR(4988503,
                         "Failed to start PrimaryOnlyService {service} because the query on {ns} "
                         "for state documents failed due to {error}",
                         "ns"_attr = getStateDocumentsNS(),
@@ -277,7 +277,7 @@ void PrimaryOnlyService::_rebuildInstances() noexcept {
         auto idElem = doc["_id"];
         if (idElem.eoo()) {
             LOGV2_WARNING(
-                0,
+                4988502,
                 "Missing _id element when parsing state document for PrimaryOnlyService {service}. "
                 "Skipping creating an Instance for state document: {stateDoc}",
                 "service"_attr = getServiceName(),
@@ -289,7 +289,7 @@ void PrimaryOnlyService::_rebuildInstances() noexcept {
 
         auto [_, inserted] = _instances.emplace(instanceID, instance);
         if (!inserted) {
-            LOGV2_WARNING(0,
+            LOGV2_WARNING(4988501,
                           "Instance with ID {instanceID} already exists when reloading state for "
                           "PrimaryOnlyService {service} from {ns} during stepUp",
                           "instanceID"_attr = instanceID,
