@@ -178,13 +178,10 @@ public:
 
         WaitForMajorityService::get(getServiceContext()).setUp(getServiceContext());
 
-        auto opCtx = cc().makeOperationContext();
+
         {
+            auto opCtx = cc().makeOperationContext();
             auto replCoord = std::make_unique<ReplicationCoordinatorMock>(serviceContext);
-            ASSERT_OK(replCoord->setFollowerMode(MemberState::RS_PRIMARY));
-            ASSERT_OK(replCoord->updateTerm(opCtx.get(), 1));
-            replCoord->setMyLastAppliedOpTimeAndWallTime(
-                OpTimeAndWallTime(OpTime(Timestamp(1, 1), 1), Date_t()));
             ReplicationCoordinator::set(serviceContext, std::move(replCoord));
 
             repl::setOplogCollectionName(serviceContext);
@@ -194,17 +191,15 @@ public:
             OpObserverRegistry* opObserverRegistry =
                 dynamic_cast<OpObserverRegistry*>(serviceContext->getOpObserver());
             opObserverRegistry->addObserver(std::make_unique<OpObserverImpl>());
-        }
 
-        _registry = std::make_unique<PrimaryOnlyServiceRegistry>();
-        {
+
+            _registry = std::make_unique<PrimaryOnlyServiceRegistry>();
             std::unique_ptr<TestService> service =
                 std::make_unique<TestService>(getServiceContext());
-
             _registry->registerService(std::move(service));
             _registry->onStartup(opCtx.get());
-            _registry->onStepUpComplete(opCtx.get(), 1);
         }
+        stepUp();
 
         _service = _registry->lookupService("TestService");
         ASSERT(_service);
@@ -244,7 +239,7 @@ public:
 protected:
     std::unique_ptr<PrimaryOnlyServiceRegistry> _registry;
     PrimaryOnlyService* _service;
-    long long _term = 1;
+    long long _term = 0;
 };
 
 DEATH_TEST_F(PrimaryOnlyServiceTest,
