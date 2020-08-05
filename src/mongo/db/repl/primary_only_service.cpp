@@ -257,7 +257,10 @@ void PrimaryOnlyService::_rebuildInstances() noexcept {
         auto opCtx = cc().makeOperationContext();
         DBDirectClient client(opCtx.get());
         try {
-            client.findN(stateDocuments, getStateDocumentsNS().toString(), Query(), 0);
+            auto cursor = client.query(getStateDocumentsNS(), Query());
+            while (cursor->more()) {
+                stateDocuments.push_back(cursor->nextSafe().getOwned());
+            }
         } catch (const DBException& e) {
             LOGV2_ERROR(0,
                         "Failed to start PrimaryOnlyService {service} because the query on {ns} "

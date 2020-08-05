@@ -46,12 +46,14 @@
 using namespace mongo;
 using namespace mongo::repl;
 
+namespace {
 constexpr StringData kTestServiceName = "TestService"_sd;
 
 MONGO_FAIL_POINT_DEFINE(TestServiceHangDuringInitialization)
 MONGO_FAIL_POINT_DEFINE(TestServiceHangDuringStateOne);
 MONGO_FAIL_POINT_DEFINE(TestServiceHangDuringStateTwo);
 MONGO_FAIL_POINT_DEFINE(TestServiceHangDuringStateThree);
+}  // namespace
 
 class TestService final : public PrimaryOnlyService {
 public:
@@ -85,7 +87,8 @@ public:
             : PrimaryOnlyService::TypedInstance<Instance>(),
               _id(stateDoc["_id"].wrap().getOwned()),
               _stateDoc(std::move(stateDoc)),
-              _state((State)_stateDoc["state"].Int()) {}
+              _state((State)_stateDoc["state"].Int()),
+              _initialState(_state) {}
 
         void run(std::shared_ptr<executor::ScopedTaskExecutor> executor) noexcept override {
             if (MONGO_unlikely(TestServiceHangDuringInitialization.shouldFail())) {
@@ -123,14 +126,19 @@ public:
             _completionPromise.getFuture().wait();
         }
 
+        int getID() {
+            stdx::lock_guard lk(_mutex);
+            return _id["_id"].Int();
+        }
+
         int getState() {
             stdx::lock_guard lk(_mutex);
             return (int)_state;
         }
 
-        int getID() {
+        int getInitialState() {
             stdx::lock_guard lk(_mutex);
-            return _id["_id"].Int();
+            return (int)_initialState;
         }
 
     private:
@@ -165,6 +173,7 @@ public:
         const InstanceID _id;
         BSONObj _stateDoc;
         State _state = State::initializing;
+        const State _initialState;
         SharedPromise<void> _completionPromise;
         Mutex _mutex = MONGO_MAKE_LATCH("PrimaryOnlyServiceTest::TestService::_mutex");
     };
@@ -307,13 +316,40 @@ TEST_F(PrimaryOnlyServiceTest, CreateWithoutID) {
 }
 
 TEST_F(PrimaryOnlyServiceTest, StepDownBeforePersisted) {
-    auto& fp = TestServiceHangDuringInitialization;
-    fp.setMode(FailPoint::alwaysOn);
+    // Prevent the instance from writing its initial state document to the storage engine.
+    TestServiceHangDuringInitialization.setMode(FailPoint::alwaysOn);
 
     auto instance = TestService::Instance::getOrCreate(_service, BSON("_id" << 0 << "state" << 0));
-    fp.waitForTimesEntered(1);
-    _registry->onStepDown();
-    fp.setMode(FailPoint::off);
+    TestServiceHangDuringInitialization.waitForTimesEntered(1);
+    stepDown();
+    TestServiceHangDuringInitialization.setMode(FailPoint::off);
 
-    //_registry->onStepUp(1);
+    stepUp();
+
+    // Since the Instance ever wrote its state document, it shouldn't be recreated on stepUp.
+    auto recreatedInstance = TestService::Instance::lookup(_service, BSON("_id" << 0));
+    ASSERT(!recreatedInstance.is_initialized());
+}
+
+TEST_F(PrimaryOnlyServiceTest, RecreateInstanceOnStepUp) {
+    // Cause the Instance to be interrupted after writing its initial state document in state 1.
+    TestServiceHangDuringStateOne.setMode(FailPoint::alwaysOn);
+
+    auto instance = TestService::Instance::getOrCreate(_service, BSON("_id" << 0 << "state" << 0));
+    TestServiceHangDuringStateOne.waitForTimesEntered(1);
+
+    stepDown();
+
+    TestServiceHangDuringStateOne.setMode(FailPoint::off);
+    TestServiceHangDuringStateTwo.setMode(FailPoint::alwaysOn);
+
+    stepUp();
+
+    TestServiceHangDuringStateTwo.waitForTimesEntered(1);
+
+    // Instance should be recreated in state 1.
+    auto recreatedInstance = TestService::Instance::lookup(_service, BSON("_id" << 0)).get();
+    ASSERT_EQ(1, recreatedInstance->getInitialState());
+
+    TestServiceHangDuringStateTwo.setMode(FailPoint::off);
 }
