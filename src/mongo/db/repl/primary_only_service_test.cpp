@@ -48,10 +48,10 @@ using namespace mongo::repl;
 
 constexpr StringData kTestServiceName = "TestService"_sd;
 
-MONGO_FAIL_POINT_DEFINE(TestServiceHangBeforeStateOne);
-MONGO_FAIL_POINT_DEFINE(TestServiceHangBeforeStateTwo);
-MONGO_FAIL_POINT_DEFINE(TestServiceHangBeforeStateThree);
-MONGO_FAIL_POINT_DEFINE(TestServiceHangBeforeCompletion);
+MONGO_FAIL_POINT_DEFINE(TestServiceHangDuringInitialization)
+MONGO_FAIL_POINT_DEFINE(TestServiceHangDuringStateOne);
+MONGO_FAIL_POINT_DEFINE(TestServiceHangDuringStateTwo);
+MONGO_FAIL_POINT_DEFINE(TestServiceHangDuringStateThree);
 
 class TestService final : public PrimaryOnlyService {
 public:
@@ -88,32 +88,34 @@ public:
               _state((State)_stateDoc["state"].Int()) {}
 
         void run(std::shared_ptr<executor::ScopedTaskExecutor> executor) noexcept override {
+            if (MONGO_unlikely(TestServiceHangDuringInitialization.shouldFail())) {
+                TestServiceHangDuringInitialization.pauseWhileSet();
+            }
+
             SemiFuture<void>::makeReady()
                 .thenRunOn(**executor)
                 .then([this] {
-                    if (MONGO_unlikely(TestServiceHangBeforeStateOne.shouldFail())) {
-                        TestServiceHangBeforeStateOne.pauseWhileSet();
-                    }
                     _runOnce(State::initializing, State::one);
+
+                    if (MONGO_unlikely(TestServiceHangDuringStateOne.shouldFail())) {
+                        TestServiceHangDuringStateOne.pauseWhileSet();
+                    }
                 })
                 .then([this] {
-                    if (MONGO_unlikely(TestServiceHangBeforeStateTwo.shouldFail())) {
-                        TestServiceHangBeforeStateTwo.pauseWhileSet();
-                    }
                     _runOnce(State::one, State::two);
+
+                    if (MONGO_unlikely(TestServiceHangDuringStateTwo.shouldFail())) {
+                        TestServiceHangDuringStateTwo.pauseWhileSet();
+                    }
                 })
                 .then([this] {
-                    if (MONGO_unlikely(TestServiceHangBeforeStateThree.shouldFail())) {
-                        TestServiceHangBeforeStateThree.pauseWhileSet();
-                    }
                     _runOnce(State::two, State::three);
-                })
-                .then([this] {
-                    if (MONGO_unlikely(TestServiceHangBeforeCompletion.shouldFail())) {
-                        TestServiceHangBeforeCompletion.pauseWhileSet();
+
+                    if (MONGO_unlikely(TestServiceHangDuringStateThree.shouldFail())) {
+                        TestServiceHangDuringStateThree.pauseWhileSet();
                     }
-                    _runOnce(State::three, State::done);
                 })
+                .then([this] { _runOnce(State::three, State::done); })
                 .getAsync([this](auto) { _completionPromise.emplaceValue(); });
         }
 
@@ -218,9 +220,31 @@ public:
         ServiceContextMongoDTest::tearDown();
     }
 
+    void stepDown() {
+        ASSERT_OK(ReplicationCoordinator::get(getServiceContext())
+                      ->setFollowerMode(MemberState::RS_SECONDARY));
+        _registry->onStepDown();
+    }
+
+    void stepUp() {
+        auto opCtx = cc().makeOperationContext();
+        auto replCoord = ReplicationCoordinator::get(getServiceContext());
+
+        // Advance term
+        _term++;
+
+        ASSERT_OK(replCoord->setFollowerMode(MemberState::RS_PRIMARY));
+        ASSERT_OK(replCoord->updateTerm(opCtx.get(), _term));
+        replCoord->setMyLastAppliedOpTimeAndWallTime(
+            OpTimeAndWallTime(OpTime(Timestamp(1, 1), _term), Date_t()));
+
+        _registry->onStepUpComplete(opCtx.get(), _term);
+    }
+
 protected:
     std::unique_ptr<PrimaryOnlyServiceRegistry> _registry;
     PrimaryOnlyService* _service;
+    long long _term = 1;
 };
 
 DEATH_TEST_F(PrimaryOnlyServiceTest,
@@ -285,4 +309,16 @@ TEST_F(PrimaryOnlyServiceTest, CreateWhenNotPrimary) {
 TEST_F(PrimaryOnlyServiceTest, CreateWithoutID) {
     ASSERT_THROWS_CODE(
         TestService::Instance::getOrCreate(_service, BSON("state" << 0)), DBException, 4908702);
+}
+
+TEST_F(PrimaryOnlyServiceTest, StepDownBeforePersisted) {
+    auto& fp = TestServiceHangDuringInitialization;
+    fp.setMode(FailPoint::alwaysOn);
+
+    auto instance = TestService::Instance::getOrCreate(_service, BSON("_id" << 0 << "state" << 0));
+    fp.waitForTimesEntered(1);
+    _registry->onStepDown();
+    fp.setMode(FailPoint::off);
+
+    //_registry->onStepUp(1);
 }
