@@ -55,7 +55,7 @@ namespace stdx = mongo::stdx;
 
 namespace mongo_test {
 TEST(FailPoint, InitialState) {
-    FailPoint failPoint;
+    FailPoint failPoint("testFP");
     ASSERT_FALSE(failPoint.shouldFail());
 }
 
