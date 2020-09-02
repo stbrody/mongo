@@ -337,7 +337,7 @@ FailPointEnableBlock::~FailPointEnableBlock() {
     LOGV2_WARNING(23831,
                   "Set failpoint {failPointName} to: {failPoint}",
                   "Set failpoint",
-                  "failPointName"_attr = _failPointName,
+                  "failPointName"_attr = _failPoint->getName();
                   "failPoint"_attr = _failPoint->toBSON());
 }
 
