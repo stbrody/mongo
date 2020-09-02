@@ -60,7 +60,7 @@ TEST(FailPoint, InitialState) {
 }
 
 TEST(FailPoint, AlwaysOn) {
-    FailPoint failPoint;
+    FailPoint failPoint("testFP");
     failPoint.setMode(FailPoint::alwaysOn);
     ASSERT(failPoint.shouldFail());
 
@@ -74,7 +74,7 @@ TEST(FailPoint, AlwaysOn) {
 }
 
 TEST(FailPoint, NTimes) {
-    FailPoint failPoint;
+    FailPoint failPoint("testFP");
     failPoint.setMode(FailPoint::nTimes, 4);
     ASSERT(failPoint.shouldFail());
     ASSERT(failPoint.shouldFail());
@@ -87,14 +87,14 @@ TEST(FailPoint, NTimes) {
 }
 
 TEST(FailPoint, BlockOff) {
-    FailPoint failPoint;
+    FailPoint failPoint("testFP");
     bool called = false;
     failPoint.execute([&](const BSONObj&) { called = true; });
     ASSERT_FALSE(called);
 }
 
 TEST(FailPoint, BlockAlwaysOn) {
-    FailPoint failPoint;
+    FailPoint failPoint("testFP");
     failPoint.setMode(FailPoint::alwaysOn);
     bool called = false;
 
@@ -104,7 +104,7 @@ TEST(FailPoint, BlockAlwaysOn) {
 }
 
 TEST(FailPoint, BlockNTimes) {
-    FailPoint failPoint;
+    FailPoint failPoint("testFP");
     failPoint.setMode(FailPoint::nTimes, 1);
     size_t counter = 0;
 
@@ -116,7 +116,7 @@ TEST(FailPoint, BlockNTimes) {
 }
 
 TEST(FailPoint, BlockWithException) {
-    FailPoint failPoint;
+    FailPoint failPoint("testFP");
     failPoint.setMode(FailPoint::alwaysOn);
     bool threw = false;
 
@@ -134,7 +134,7 @@ TEST(FailPoint, BlockWithException) {
 }
 
 TEST(FailPoint, SetGetParam) {
-    FailPoint failPoint;
+    FailPoint failPoint("testFP");
     failPoint.setMode(FailPoint::alwaysOn, 0, BSON("x" << 20));
 
     failPoint.execute([&](const BSONObj& data) { ASSERT_EQUALS(20, data["x"].numberInt()); });
@@ -277,7 +277,7 @@ static int64_t runParallelFailPointTest(FailPoint::Mode fpMode,
                                         const int32_t numEncountersPerThread) {
     ASSERT_GT(numThreads, 0);
     ASSERT_GT(numEncountersPerThread, 0);
-    FailPoint failPoint;
+    FailPoint failPoint("testFP");
     failPoint.setMode(fpMode, fpVal);
     std::vector<stdx::thread*> tasks;
     std::vector<int64_t> counts(numThreads, 0);
@@ -425,7 +425,7 @@ TEST(FailPoint, FailPointEnableBlockByPointer) {
 }
 
 TEST(FailPoint, FailPointExecuteIfBasicTest) {
-    FailPoint failPoint;
+    FailPoint failPoint("testFP");
     failPoint.setMode(FailPoint::nTimes, 1, BSON("skip" << true));
     {
         bool hit = false;
@@ -476,7 +476,7 @@ void assertFunctionInterruptable(std::function<void(Interruptible* interruptible
 }
 
 TEST(FailPoint, PauseWhileSetInterruptibility) {
-    FailPoint failPoint;
+    FailPoint failPoint("testFP");
     failPoint.setMode(FailPoint::alwaysOn);
 
     assertFunctionInterruptable(
@@ -486,7 +486,7 @@ TEST(FailPoint, PauseWhileSetInterruptibility) {
 }
 
 TEST(FailPoint, WaitForFailPointTimeout) {
-    FailPoint failPoint;
+    FailPoint failPoint("testFP");
     failPoint.setMode(FailPoint::alwaysOn);
 
     assertFunctionInterruptable([&failPoint](Interruptible* interruptible) {
