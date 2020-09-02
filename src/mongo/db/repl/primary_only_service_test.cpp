@@ -333,8 +333,7 @@ TEST_F(PrimaryOnlyServiceTest, BasicCreateInstance) {
 }
 
 TEST_F(PrimaryOnlyServiceTest, LookupInstance) {
-    // Make sure the instance doesn't complete before we try to look it up.
-    TestServiceHangDuringInitialization.setMode(FailPoint::alwaysOn);
+    auto fp = std::make_unique<FailPointEnableBlock>(&TestServiceHangDuringInitialization);
     auto instance = TestService::Instance::getOrCreate(_service, BSON("_id" << 0 << "state" << 0));
     ASSERT(instance.get());
     ASSERT_EQ(0, instance->getID());
@@ -343,7 +342,7 @@ TEST_F(PrimaryOnlyServiceTest, LookupInstance) {
 
     ASSERT_EQ(instance.get(), instance2.get());
 
-    TestServiceHangDuringInitialization.setMode(FailPoint::off);
+    fp.reset();
     instance->getCompletionFuture().get();
 
     // Shouldn't be able to look up instance after it has completed running.
@@ -353,7 +352,7 @@ TEST_F(PrimaryOnlyServiceTest, LookupInstance) {
 
 TEST_F(PrimaryOnlyServiceTest, DoubleCreateInstance) {
     // Make sure the first instance doesn't complete before we try to create the second.
-    TestServiceHangDuringInitialization.setMode(FailPoint::alwaysOn);
+    FailPointEnableBlock fp(&TestServiceHangDuringInitialization);
 
     auto instance = TestService::Instance::getOrCreate(_service, BSON("_id" << 0 << "state" << 0));
     ASSERT(instance.get());
@@ -363,8 +362,6 @@ TEST_F(PrimaryOnlyServiceTest, DoubleCreateInstance) {
     // the already existing instance based on the _id only.
     auto instance2 = TestService::Instance::getOrCreate(_service, BSON("_id" << 0 << "state" << 1));
     ASSERT_EQ(instance.get(), instance2.get());
-
-    TestServiceHangDuringInitialization.setMode(FailPoint::off);
 }
 
 TEST_F(PrimaryOnlyServiceTest, CreateWhenNotPrimary) {
@@ -383,12 +380,12 @@ TEST_F(PrimaryOnlyServiceTest, CreateWithoutID) {
 
 TEST_F(PrimaryOnlyServiceTest, StepDownBeforePersisted) {
     // Prevent the instance from writing its initial state document to the storage engine.
-    auto timesEntered = TestServiceHangDuringInitialization.setMode(FailPoint::alwaysOn);
+    auto fp = std::make_unique<FailPointEnableBlock>(&TestServiceHangDuringInitialization);
 
     auto instance = TestService::Instance::getOrCreate(_service, BSON("_id" << 0 << "state" << 0));
-    TestServiceHangDuringInitialization.waitForTimesEntered(++timesEntered);
+    (*fp)->waitForTimesEntered(fp->initialTimesEntered() + 1);
     stepDown();
-    TestServiceHangDuringInitialization.setMode(FailPoint::off);
+    fp.reset();
 
     ASSERT_THROWS_CODE_AND_WHAT(instance->getCompletionFuture().get(),
                                 DBException,
@@ -404,38 +401,38 @@ TEST_F(PrimaryOnlyServiceTest, StepDownBeforePersisted) {
 
 TEST_F(PrimaryOnlyServiceTest, RecreateInstanceOnStepUp) {
     // Cause the Instance to be interrupted after writing its initial state document in state 1.
-    auto stateOneFPTimesEntered = TestServiceHangDuringStateOne.setMode(FailPoint::alwaysOn);
+    auto stateOneFP = std::make_unique<FailPointEnableBlock>(&TestServiceHangDuringStateOne);
 
     auto instance = TestService::Instance::getOrCreate(_service, BSON("_id" << 0 << "state" << 0));
-    TestServiceHangDuringStateOne.waitForTimesEntered(++stateOneFPTimesEntered);
+    (*stateOneFP)->waitForTimesEntered(stateOneFP->initialTimesEntered() + 1);
 
     ASSERT_EQ(TestService::State::kInitializing, instance->getInitialState());
     ASSERT_EQ(TestService::State::kOne, instance->getState());
 
     stepDown();
 
-    TestServiceHangDuringStateOne.setMode(FailPoint::off);
-    auto stateTwoFPTimesEntered = TestServiceHangDuringStateTwo.setMode(FailPoint::alwaysOn);
+    stateOneFP.reset();
+    auto stateTwoFP = std::make_unique<FailPointEnableBlock>(&TestServiceHangDuringStateTwo);
 
     stepUp();
 
     auto recreatedInstance = TestService::Instance::lookup(_service, BSON("_id" << 0)).get();
     ASSERT_EQ(TestService::State::kOne, recreatedInstance->getInitialState());
-    TestServiceHangDuringStateTwo.waitForTimesEntered(++stateTwoFPTimesEntered);
+    (*stateTwoFP)->waitForTimesEntered(stateTwoFP->initialTimesEntered() + 1);
     ASSERT_EQ(TestService::State::kTwo, recreatedInstance->getState());
 
     stepDown();
 
-    TestServiceHangDuringStateTwo.setMode(FailPoint::off);
+    stateTwoFP.reset();
     // Need to block instance execution after it's started running but before it's completed so that
     // the lookup() call later can find the Instance.
-    stateOneFPTimesEntered = TestServiceHangDuringStateOne.setMode(FailPoint::alwaysOn);
+    stateOneFP = std::make_unique<FailPointEnableBlock>(&TestServiceHangDuringStateOne);
 
     stepUp();
 
     recreatedInstance = TestService::Instance::lookup(_service, BSON("_id" << 0)).get();
     ASSERT_EQ(TestService::State::kTwo, recreatedInstance->getInitialState());
-    TestServiceHangDuringStateOne.setMode(FailPoint::off);
+    stateOneFP.reset();
     recreatedInstance->getCompletionFuture().get();
     ASSERT_EQ(TestService::State::kDone, recreatedInstance->getState());
 
@@ -453,10 +450,10 @@ TEST_F(PrimaryOnlyServiceTest, RecreateInstanceOnStepUp) {
 
 TEST_F(PrimaryOnlyServiceTest, StepDownBeforeRebuildingInstances) {
     // Cause the Instance to be interrupted after writing its initial state document in state 1.
-    auto stateOneFPTimesEntered = TestServiceHangDuringStateOne.setMode(FailPoint::alwaysOn);
+    auto stateOneFP = std::make_unique<FailPointEnableBlock>(&TestServiceHangDuringStateOne);
 
     auto instance = TestService::Instance::getOrCreate(_service, BSON("_id" << 0 << "state" << 0));
-    TestServiceHangDuringStateOne.waitForTimesEntered(++stateOneFPTimesEntered);
+    (*stateOneFP)->waitForTimesEntered(stateOneFP->initialTimesEntered() + 1);
 
     ASSERT_EQ(TestService::State::kInitializing, instance->getInitialState());
     ASSERT_EQ(TestService::State::kOne, instance->getState());
@@ -464,10 +461,10 @@ TEST_F(PrimaryOnlyServiceTest, StepDownBeforeRebuildingInstances) {
     stepDown();
 
     // Let the running instance terminate.
-    TestServiceHangDuringStateOne.setMode(FailPoint::off);
+    stateOneFP.reset();
     // Make the instance rebuild on stepUp hang
-    auto rebuildingFPTimesEntered =
-        PrimaryOnlyServiceHangBeforeRebuildingInstances.setMode(FailPoint::alwaysOn);
+    auto rebuildFP =
+        std::make_unique<FailPointEnableBlock>(&PrimaryOnlyServiceHangBeforeRebuildingInstances);
 
     stepUp();
 
@@ -476,45 +473,46 @@ TEST_F(PrimaryOnlyServiceTest, StepDownBeforeRebuildingInstances) {
     auto getInstanceFuture = SemiFuture<void>::makeReady().thenRunOn(_testExecutor).then([this]() {
         return TestService::Instance::getOrCreate(_service, BSON("_id" << 0 << "state" << 0));
     });
-    PrimaryOnlyServiceHangBeforeRebuildingInstances.waitForTimesEntered(++rebuildingFPTimesEntered);
+    (*rebuildFP)->waitForTimesEntered(rebuildFP->initialTimesEntered() + 1);
     ASSERT_FALSE(getInstanceFuture.isReady());
 
     // Stepdown, interrupting the thread waiting for the rebuilt instance.
     stepDown();
 
     // Let the previous stepUp attempt continue and realize that the node has since stepped down.
-    PrimaryOnlyServiceHangBeforeRebuildingInstances.setMode(FailPoint::off);
+    rebuildFP.reset();
     ASSERT_THROWS_CODE(getInstanceFuture.get(), DBException, ErrorCodes::NotMaster);
 
     // Now do another stepUp that is allowed to complete this time.
-    stateOneFPTimesEntered = TestServiceHangDuringStateOne.setMode(FailPoint::alwaysOn);
+    stateOneFP = std::make_unique<FailPointEnableBlock>(&TestServiceHangDuringStateOne);
     stepUp();
-    TestServiceHangDuringStateOne.waitForTimesEntered(++stateOneFPTimesEntered);
+    (*stateOneFP)->waitForTimesEntered(stateOneFP->initialTimesEntered() + 1);
 
     instance = TestService::Instance::lookup(_service, BSON("_id" << 0)).get();
     ASSERT_EQ(TestService::State::kOne, instance->getInitialState());
     ASSERT_EQ(TestService::State::kOne, instance->getState());
 
-    TestServiceHangDuringStateOne.setMode(FailPoint::off);
+    stateOneFP.reset();
 
     instance->getCompletionFuture().get();
 }
 
 TEST_F(PrimaryOnlyServiceTest, RecreateInstancesFails) {
     // Cause the Instance to be interrupted after writing its initial state document in state 1.
-    auto stateOneFPTimesEntered = TestServiceHangDuringStateOne.setMode(FailPoint::alwaysOn);
+    auto stateOneFP = std::make_unique<FailPointEnableBlock>(&TestServiceHangDuringStateOne);
 
     auto instance = TestService::Instance::getOrCreate(_service, BSON("_id" << 0 << "state" << 0));
-    TestServiceHangDuringStateOne.waitForTimesEntered(++stateOneFPTimesEntered);
+    (*stateOneFP)->waitForTimesEntered(stateOneFP->initialTimesEntered() + 1);
 
     ASSERT_EQ(TestService::State::kInitializing, instance->getInitialState());
     ASSERT_EQ(TestService::State::kOne, instance->getState());
 
     stepDown();
 
-    TestServiceHangDuringStateOne.setMode(FailPoint::off);
+    stateOneFP.reset();
     // Make querying the state document collection on stepUp fail
-    PrimaryOnlyServiceFailRebuildingInstances.setMode(FailPoint::alwaysOn);
+    auto rebuildFP =
+        std::make_unique<FailPointEnableBlock>(&PrimaryOnlyServiceFailRebuildingInstances);
 
     stepUp();
 
@@ -539,17 +537,17 @@ TEST_F(PrimaryOnlyServiceTest, RecreateInstancesFails) {
         ErrorCodes::NotMaster);
 
     // Allow the next stepUp to succeed.
-    PrimaryOnlyServiceFailRebuildingInstances.setMode(FailPoint::off);
-    stateOneFPTimesEntered = TestServiceHangDuringStateOne.setMode(FailPoint::alwaysOn);
+    rebuildFP.reset();
+    stateOneFP = std::make_unique<FailPointEnableBlock>(&TestServiceHangDuringStateOne);
 
     stepUp();
-    TestServiceHangDuringStateOne.waitForTimesEntered(++stateOneFPTimesEntered);
+    (*stateOneFP)->waitForTimesEntered(stateOneFP->initialTimesEntered() + 1);
 
     // Instance should be recreated successfully.
     instance = TestService::Instance::lookup(_service, BSON("_id" << 0)).get();
     ASSERT_EQ(TestService::State::kOne, instance->getInitialState());
     ASSERT_EQ(TestService::State::kOne, instance->getState());
-    TestServiceHangDuringStateOne.setMode(FailPoint::off);
+    stateOneFP.reset();
     instance->getCompletionFuture().get();
     ASSERT_EQ(TestService::State::kDone, instance->getState());
 }
@@ -557,12 +555,12 @@ TEST_F(PrimaryOnlyServiceTest, RecreateInstancesFails) {
 TEST_F(PrimaryOnlyServiceTest, OpCtxInterruptedByStepdown) {
     // Ensure that if work has already been scheduled on the executor, but hasn't yet created an
     // OpCtx, and then we stepDown, that the OpCtx that gets created still gets interrupted.
-    auto timesEntered = TestServiceHangBeforeWritingStateDoc.setMode(FailPoint::alwaysOn);
+    auto fp = std::make_unique<FailPointEnableBlock>(&TestServiceHangBeforeWritingStateDoc);
 
     auto instance = TestService::Instance::getOrCreate(_service, BSON("_id" << 0 << "state" << 0));
-    TestServiceHangBeforeWritingStateDoc.waitForTimesEntered(++timesEntered);
+    (*fp)->waitForTimesEntered(fp->initialTimesEntered() + 1);
     stepDown();
-    TestServiceHangBeforeWritingStateDoc.setMode(FailPoint::off);
+    fp.reset();
 
     ASSERT_EQ(ErrorCodes::NotMaster, instance->getCompletionFuture().getNoThrow());
 }
