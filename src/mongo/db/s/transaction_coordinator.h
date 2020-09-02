@@ -64,18 +64,22 @@ public:
     };
 
     /**
-     * Instantiates a new TransactioncCoordinator for the specified lsid + txnNumber pair and gives
-     * it a 'scheduler' to use for any asynchronous tasks it spawns.
+     * Instantiates a new TransactioncCoordinator for the specified lsid + txnNumber pair.
      *
-     * If the 'coordinateCommitDeadline' parameter is specified, a timed task will be scheduled to
+     * If the 'deadline' parameter is specified, a timed task will be scheduled to
      * cause the coordinator to be put in a cancelled state, if runCommit is not eventually
      * received.
      */
-    TransactionCoordinator(OperationContext* operationContext,
+    TransactionCoordinator(ServiceContext* serviceContext,
                            const LogicalSessionId& lsid,
                            TxnNumber txnNumber,
-                           std::unique_ptr<txn::AsyncWorkScheduler> scheduler,
                            Date_t deadline);
+
+    /**
+     * Gives this TransactionCoordinator 'scheduler' to use for any asynchronous tasks it spawns and
+     * kicks off coordinator work.
+     */
+    void beginRunning(std::shared_ptr<txn::AsyncWorkScheduler> scheduler);
 
     ~TransactionCoordinator();
 
@@ -129,8 +133,6 @@ public:
 
 
 private:
-    void _updateAssociatedClient(Client* client);
-
     bool _reserveKickOffCommitPromise();
 
     /**
@@ -154,14 +156,6 @@ private:
     // The lsid + transaction number that this coordinator is coordinating
     const LogicalSessionId _lsid;
     const TxnNumber _txnNumber;
-
-    // Scheduler and context wrapping all asynchronous work dispatched by this coordinator
-    std::unique_ptr<txn::AsyncWorkScheduler> _scheduler;
-
-    // Scheduler used for the persist participants + prepare part of the 2PC sequence and
-    // interrupted separately from the rest of the chain in order to allow the clean-up tasks
-    // (running on _scheduler to still be able to execute).
-    std::unique_ptr<txn::AsyncWorkScheduler> _sendPrepareScheduler;
 
     // Protects the state below
     mutable Mutex _mutex = MONGO_MAKE_LATCH("TransactionCoordinator::_mutex");

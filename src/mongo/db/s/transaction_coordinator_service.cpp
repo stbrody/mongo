@@ -81,7 +81,8 @@ void TransactionCoordinatorService::createCoordinator(OperationContext* opCtx,
     }
 
     auto coordinator = std::make_shared<TransactionCoordinator>(
-        opCtx, lsid, txnNumber, scheduler.makeChildScheduler(), commitDeadline);
+        opCtx->getServiceContext(), lsid, txnNumber, commitDeadline);
+    coordinator->beginRunning(scheduler.makeChildScheduler());
 
     catalog.insert(opCtx, lsid, txnNumber, coordinator);
 }
@@ -223,11 +224,11 @@ void TransactionCoordinatorService::onStepUp(OperationContext* opCtx,
                         const auto txnNumber = *doc.getId().getTxnNumber();
 
                         auto coordinator = std::make_shared<TransactionCoordinator>(
-                            opCtx,
+                            service,
                             lsid,
                             txnNumber,
-                            scheduler.makeChildScheduler(),
                             clockSource->now() + Seconds(gTransactionLifetimeLimitSeconds.load()));
+                        coordinator->beginRunning(scheduler.makeChildScheduler());
 
                         catalog.insert(opCtx, lsid, txnNumber, coordinator, true /* forStepUp */);
                         coordinator->continueCommit(doc);
