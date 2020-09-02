@@ -57,9 +57,9 @@ protected:
                                     LogicalSessionId lsid,
                                     TxnNumber txnNumber) {
         auto newCoordinator = std::make_shared<TransactionCoordinator>(
-            getServiceContext(), lsid, txnNumber, Date_t::max());
+            opCtx->getServiceContext(), lsid, txnNumber, Date_t::max());
         newCoordinator->beginRunning(
-            std::make_unique<txn::AsyncWorkScheduler>(getServiceContext()));
+            std::make_unique<txn::AsyncWorkScheduler>(opCtx->getServiceContext()));
 
         _coordinatorCatalog->insert(opCtx, lsid, txnNumber, newCoordinator);
     }

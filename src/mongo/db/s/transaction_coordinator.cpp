@@ -100,7 +100,7 @@ void TransactionCoordinator::beginRunning(std::unique_ptr<txn::AsyncWorkSchedule
     // Store _scheduler and _sendPrepareScheduler as members of TransactionCoordinator to tie their
     // lifetime to the lifetime of the coordinator object.
     _scheduler = std::move(scheduler);
-    _sendPrepareScheduler = scheduler->makeChildScheduler();
+    _sendPrepareScheduler = _scheduler->makeChildScheduler();
 
     auto kickOffCommitPF = makePromiseFuture<void>();
     _kickOffCommitPromise = std::move(kickOffCommitPF.promise);
