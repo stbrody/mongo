@@ -286,8 +286,8 @@ BSONObj FailPoint::toBSON() const {
     return builder.obj();
 }
 
-FailPointRegisterer::FailPointRegisterer(const std::string& name, FailPoint* fp) {
-    uassertStatusOK(globalFailPointRegistry().add(name, fp));
+FailPointRegisterer::FailPointRegisterer(FailPoint* fp) {
+    uassertStatusOK(globalFailPointRegistry().add(fp));
 }
 
 FailPointRegistry& globalFailPointRegistry() {
