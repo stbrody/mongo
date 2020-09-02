@@ -70,7 +70,7 @@ void FailPoint::setThreadPRNGSeed(int32_t seed) {
     threadPrng = PseudoRandom(seed);
 }
 
-FailPoint::FailPoint() = default;
+FailPoint::FailPoint(std::string name) : _name(std::move(name)) {}
 
 void FailPoint::_shouldFailCloseBlock() {
     _fpInfo.subtractAndFetch(1);
@@ -313,8 +313,14 @@ FailPointEnableBlock::FailPointEnableBlock(std::string failPointName)
     : FailPointEnableBlock(std::move(failPointName), {}) {}
 
 FailPointEnableBlock::FailPointEnableBlock(std::string failPointName, BSONObj data)
-    : _failPointName(std::move(failPointName)) {
-    _failPoint = globalFailPointRegistry().find(_failPointName);
+    : FailPointEnableBlock(globalFailPointRegistry().find(failPointName), std::move(data)) {}
+
+FailPointEnableBlock::FailPointEnableBlock(FailPoint* failPoint)
+    : FailPointEnableBlock(failPoint, {}) {}
+
+FailPointEnableBlock::FailPointEnableBlock(FailPoint* failPoint, BSONObj data)
+    : _failPoint(failPoint) {
+
     invariant(_failPoint != nullptr);
 
     _initialTimesEntered = _failPoint->setMode(FailPoint::alwaysOn, 0, std::move(data));
@@ -322,7 +328,7 @@ FailPointEnableBlock::FailPointEnableBlock(std::string failPointName, BSONObj da
     LOGV2_WARNING(23830,
                   "Set failpoint {failPointName} to: {failPoint}",
                   "Set failpoint",
-                  "failPointName"_attr = _failPointName,
+                  "failPointName"_attr = _failPoint->getName(),
                   "failPoint"_attr = _failPoint->toBSON());
 }
 
