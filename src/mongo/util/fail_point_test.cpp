@@ -240,7 +240,7 @@ private:
         }
     }
 
-    FailPoint _fp;
+    FailPoint _fp("testFP");
     std::vector<stdx::thread> _tasks;
 
     mongo::Mutex _mutex = MONGO_MAKE_LATCH();
