@@ -445,7 +445,7 @@ public:
      *     51006 - if the given name already exists in this registry.
      *     CannotMutateObject - if this registry is already frozen.
      */
-    Status add(const std::string& name, FailPoint* failPoint);
+    Status add(FailPoint* failPoint);
 
     /**
      * @return a registered FailPoint, or nullptr if it was not registered.
@@ -514,7 +514,7 @@ FailPoint::EntryCountT setGlobalFailPoint(const std::string& failPointName, cons
  */
 class FailPointRegisterer {
 public:
-    FailPointRegisterer(const std::string& name, FailPoint* fp);
+    explicit FailPointRegisterer(FailPoint* fp);
 };
 
 FailPointRegistry& globalFailPointRegistry();
@@ -526,7 +526,7 @@ FailPointRegistry& globalFailPointRegistry();
  */
 #define MONGO_FAIL_POINT_DEFINE(fp) \
     ::mongo::FailPoint fp(#fp);     \
-    ::mongo::FailPointRegisterer fp##failPointRegisterer(#fp, &fp);
+    ::mongo::FailPointRegisterer fp##failPointRegisterer(&fp);
 
 
 }  // namespace mongo

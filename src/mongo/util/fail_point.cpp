@@ -343,13 +343,14 @@ FailPointEnableBlock::~FailPointEnableBlock() {
 
 FailPointRegistry::FailPointRegistry() : _frozen(false) {}
 
-Status FailPointRegistry::add(const std::string& name, FailPoint* failPoint) {
+Status FailPointRegistry::add(FailPoint* failPoint) {
     if (_frozen) {
         return {ErrorCodes::CannotMutateObject, "Registry is already frozen"};
     }
-    auto [pos, ok] = _fpMap.insert({name, failPoint});
+    auto [pos, ok] = _fpMap.insert({failPoint->getName(), failPoint});
     if (!ok) {
-        return {ErrorCodes::Error(51006), "Fail point already registered: {}"_format(name)};
+        return {ErrorCodes::Error(51006),
+                "Fail point already registered: {}"_format(failPoint->getName())};
     }
     return Status::OK();
 }
