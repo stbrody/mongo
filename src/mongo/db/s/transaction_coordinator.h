@@ -79,7 +79,7 @@ public:
      * Gives this TransactionCoordinator 'scheduler' to use for any asynchronous tasks it spawns and
      * kicks off coordinator work.
      */
-    void beginRunning(std::shared_ptr<txn::AsyncWorkScheduler> scheduler);
+    void beginRunning(std::unique_ptr<txn::AsyncWorkScheduler> scheduler);
 
     ~TransactionCoordinator();
 
@@ -156,6 +156,14 @@ private:
     // The lsid + transaction number that this coordinator is coordinating
     const LogicalSessionId _lsid;
     const TxnNumber _txnNumber;
+
+    // Scheduler and context wrapping all asynchronous work dispatched by this coordinator
+    std::unique_ptr<txn::AsyncWorkScheduler> _scheduler;
+
+    // Scheduler used for the persist participants + prepare part of the 2PC sequence and
+    // interrupted separately from the rest of the chain in order to allow the clean-up tasks
+    // (running on _scheduler to still be able to execute).
+    std::unique_ptr<txn::AsyncWorkScheduler> _sendPrepareScheduler;
 
     // Protects the state below
     mutable Mutex _mutex = MONGO_MAKE_LATCH("TransactionCoordinator::_mutex");

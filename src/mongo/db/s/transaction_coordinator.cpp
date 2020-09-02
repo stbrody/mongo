@@ -96,12 +96,11 @@ TransactionCoordinator::TransactionCoordinator(ServiceContext* serviceContext,
           std::make_unique<TransactionCoordinatorMetricsObserver>()),
       _deadline(deadline) {}
 
-void TransactionCoordinator::beginRunning(std::shared_ptr<txn::AsyncWorkScheduler> scheduler) {
-
-    // Scheduler used for the persist participants + prepare part of the 2PC sequence and
-    // interrupted separately from the rest of the chain in order to allow the clean-up tasks
-    // (running on scheduler to still be able to execute).
-    std::shared_ptr<txn::AsyncWorkScheduler> sendPrepareScheduler = scheduler->makeChildScheduler();
+void TransactionCoordinator::beginRunning(std::unique_ptr<txn::AsyncWorkScheduler> scheduler) {
+    // Store _scheduler and _sendPrepareScheduler as members of TransactionCoordinator to tie their
+    // lifetime to the lifetime of the coordinator object.
+    _scheduler = std::move(scheduler);
+    _sendPrepareScheduler = scheduler->makeChildScheduler();
 
     auto kickOffCommitPF = makePromiseFuture<void>();
     _kickOffCommitPromise = std::move(kickOffCommitPF.promise);
@@ -111,12 +110,12 @@ void TransactionCoordinator::beginRunning(std::shared_ptr<txn::AsyncWorkSchedule
     auto deadlineFuture =
         scheduler
             ->scheduleWorkAt(_deadline,
-                             [this, sendPrepareScheduler](OperationContext*) {
+                             [this](OperationContext*) {
                                  cancelIfCommitNotYetStarted();
 
                                  // See the comments for sendPrepare about the purpose of this
                                  // cancellation code
-                                 sendPrepareScheduler->shutdown(
+                                 _sendPrepareScheduler->shutdown(
                                      {ErrorCodes::TransactionCoordinatorReachedAbortDecision,
                                       "Transaction exceeded deadline"});
                              })
@@ -143,7 +142,7 @@ void TransactionCoordinator::beginRunning(std::shared_ptr<txn::AsyncWorkSchedule
             return VectorClockMutable::get(_serviceContext)->waitForDurableTopologyTime();
         })
         .thenRunOn(Grid::get(_serviceContext)->getExecutorPool()->getFixedExecutor())
-        .then([this, sendPrepareScheduler] {
+        .then([this] {
             // Persist the participants, unless they have been made durable already (which would
             // only be the case if this coordinator was created as part of step-up recovery).
             //  Input: _participants
@@ -165,7 +164,7 @@ void TransactionCoordinator::beginRunning(std::shared_ptr<txn::AsyncWorkSchedule
             }
 
             return txn::persistParticipantsList(
-                *sendPrepareScheduler, _lsid, _txnNumber, *_participants);
+                *_sendPrepareScheduler, _lsid, _txnNumber, *_participants);
         })
         .then([this](repl::OpTime opTime) {
             return waitForMajorityWithHangFailpoint(
@@ -175,7 +174,7 @@ void TransactionCoordinator::beginRunning(std::shared_ptr<txn::AsyncWorkSchedule
                 std::move(opTime));
         })
         .thenRunOn(Grid::get(_serviceContext)->getExecutorPool()->getFixedExecutor())
-        .then([this, sendPrepareScheduler] {
+        .then([this] {
             {
                 stdx::lock_guard<Latch> lg(_mutex);
                 _participantsDurable = true;
@@ -203,7 +202,7 @@ void TransactionCoordinator::beginRunning(std::shared_ptr<txn::AsyncWorkSchedule
             }
 
             return txn::sendPrepare(
-                       _serviceContext, *sendPrepareScheduler, _lsid, _txnNumber, *_participants)
+                       _serviceContext, *_sendPrepareScheduler, _lsid, _txnNumber, *_participants)
                 .then([this](PrepareVoteConsensus consensus) mutable {
                     {
                         stdx::lock_guard<Latch> lg(_mutex);
@@ -225,7 +224,7 @@ void TransactionCoordinator::beginRunning(std::shared_ptr<txn::AsyncWorkSchedule
                     }
                 });
         })
-        .then([this, scheduler] {
+        .then([this] {
             // Persist the commit decision, unless this has already been done (which would only be
             // the case if this coordinator was created as part of step-up recovery and the recovery
             // document contained a decision).
@@ -247,7 +246,7 @@ void TransactionCoordinator::beginRunning(std::shared_ptr<txn::AsyncWorkSchedule
                     return Future<repl::OpTime>::makeReady(repl::OpTime());
             }
 
-            return txn::persistDecision(*scheduler, _lsid, _txnNumber, *_participants, *_decision);
+            return txn::persistDecision(*_scheduler, _lsid, _txnNumber, *_participants, *_decision);
         })
         .then([this](repl::OpTime opTime) {
             switch (_decision->getDecision()) {
@@ -268,7 +267,7 @@ void TransactionCoordinator::beginRunning(std::shared_ptr<txn::AsyncWorkSchedule
                                                     "hangBeforeWaitingForDecisionWriteConcern",
                                                     std::move(opTime));
         })
-        .then([this, scheduler] {
+        .then([this] {
             {
                 stdx::lock_guard<Latch> lg(_mutex);
                 _decisionDurable = true;
@@ -292,7 +291,7 @@ void TransactionCoordinator::beginRunning(std::shared_ptr<txn::AsyncWorkSchedule
             switch (_decision->getDecision()) {
                 case CommitDecision::kCommit: {
                     return txn::sendCommit(_serviceContext,
-                                           *scheduler,
+                                           *_scheduler,
                                            _lsid,
                                            _txnNumber,
                                            *_participants,
@@ -300,13 +299,13 @@ void TransactionCoordinator::beginRunning(std::shared_ptr<txn::AsyncWorkSchedule
                 }
                 case CommitDecision::kAbort: {
                     return txn::sendAbort(
-                        _serviceContext, *scheduler, _lsid, _txnNumber, *_participants);
+                        _serviceContext, *_scheduler, _lsid, _txnNumber, *_participants);
                 }
                 default:
                     MONGO_UNREACHABLE;
             };
         })
-        .then([this, scheduler] {
+        .then([this] {
             // Do a best-effort attempt (i.e., writeConcern w:1) to delete the coordinator's durable
             // state.
             {
@@ -320,12 +319,12 @@ void TransactionCoordinator::beginRunning(std::shared_ptr<txn::AsyncWorkSchedule
                     _serviceContext->getPreciseClockSource()->now());
             }
 
-            return txn::deleteCoordinatorDoc(*scheduler, _lsid, _txnNumber);
+            return txn::deleteCoordinatorDoc(*_scheduler, _lsid, _txnNumber);
         })
-        .getAsync([this, scheduler, deadlineFuture = std::move(deadlineFuture)](Status s) mutable {
+        .getAsync([this, deadlineFuture = std::move(deadlineFuture)](Status s) mutable {
             // Interrupt this coordinator's scheduler hierarchy and join the deadline task's future
             // in order to guarantee that there are no more threads running within the coordinator.
-            scheduler->shutdown(
+            _scheduler->shutdown(
                 {ErrorCodes::TransactionCoordinatorDeadlineTaskCanceled, "Coordinator completed"});
 
             return std::move(deadlineFuture).getAsync([this, s = std::move(s)](Status) {
