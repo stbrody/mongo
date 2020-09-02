@@ -143,12 +143,13 @@ TEST(FailPoint, SetGetParam) {
 class FailPointStress : public mongo::unittest::Test {
 public:
     void setUp() {
-        _fp.setMode(FailPoint::alwaysOn, 0, BSON("a" << 44));
+        _fp = std::make_unique<FailPoint>("testFP");
+        _fp->setMode(FailPoint::alwaysOn, 0, BSON("a" << 44));
     }
 
     void tearDown() {
         // Note: This can loop indefinitely if reference counter was off
-        _fp.setMode(FailPoint::off, 0, BSON("a" << 66));
+        _fp->setMode(FailPoint::off, 0, BSON("a" << 66));
     }
 
     void startTest() {
@@ -174,7 +175,7 @@ public:
 private:
     void blockTask() {
         while (true) {
-            _fp.execute([](const BSONObj& data) {
+            _fp->execute([](const BSONObj& data) {
                 // Expanded ASSERT_EQUALS since the error is not being
                 // printed out properly
                 if (data["a"].numberInt() != 44) {
@@ -196,7 +197,7 @@ private:
     void blockWithExceptionTask() {
         while (true) {
             try {
-                _fp.execute([](const BSONObj& data) {
+                _fp->execute([](const BSONObj& data) {
                     if (data["a"].numberInt() != 44) {
                         using namespace mongo::literals;
                         LOGV2_ERROR(24130,
@@ -219,7 +220,7 @@ private:
 
     void simpleTask() {
         while (true) {
-            static_cast<void>(MONGO_unlikely(_fp.shouldFail()));
+            static_cast<void>(MONGO_unlikely(_fp->shouldFail()));
             stdx::lock_guard<mongo::Latch> lk(_mutex);
             if (_inShutdown)
                 break;
@@ -228,10 +229,10 @@ private:
 
     void flipTask() {
         while (true) {
-            if (_fp.shouldFail()) {
-                _fp.setMode(FailPoint::off, 0);
+            if (_fp->shouldFail()) {
+                _fp->setMode(FailPoint::off, 0);
             } else {
-                _fp.setMode(FailPoint::alwaysOn, 0, BSON("a" << 44));
+                _fp->setMode(FailPoint::alwaysOn, 0, BSON("a" << 44));
             }
 
             stdx::lock_guard<mongo::Latch> lk(_mutex);
@@ -240,7 +241,7 @@ private:
         }
     }
 
-    FailPoint _fp("testFP");
+    std::unique_ptr<FailPoint> _fp;
     std::vector<stdx::thread> _tasks;
 
     mongo::Mutex _mutex = MONGO_MAKE_LATCH();
