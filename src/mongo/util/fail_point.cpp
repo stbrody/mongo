@@ -327,12 +327,19 @@ FailPointEnableBlock::FailPointEnableBlock(std::string failPointName, BSONObj da
 }
 
 FailPointEnableBlock::~FailPointEnableBlock() {
-    _failPoint->setMode(FailPoint::off);
-    LOGV2_WARNING(23831,
-                  "Set failpoint {failPointName} to: {failPoint}",
-                  "Set failpoint",
-                  "failPointName"_attr = _failPointName,
-                  "failPoint"_attr = _failPoint->toBSON());
+    disable();
+}
+
+void FailPointEnableBlock::disable() {
+    if (!disabled) {
+        _failPoint->setMode(FailPoint::off);
+        LOGV2_WARNING(23831,
+                      "Set failpoint {failPointName} to: {failPoint}",
+                      "Set failpoint",
+                      "failPointName"_attr = _failPointName,
+                      "failPoint"_attr = _failPoint->toBSON());
+    }
+    disabled = true;
 }
 
 FailPointRegistry::FailPointRegistry() : _frozen(false) {}

@@ -411,6 +411,20 @@ TEST(FailPoint, FailPointBlockBasicTest) {
     ASSERT_FALSE(failPoint->shouldFail());
 }
 
+TEST(FailPoint, FailPointBlockEarlyDisable) {
+    auto failPoint = mongo::globalFailPointRegistry().find("dummy");
+
+    ASSERT_FALSE(failPoint->shouldFail());
+
+
+    FailPointEnableBlock dummyFp("dummy");
+    ASSERT_TRUE(failPoint->shouldFail());
+
+    dummyFp.disable();
+
+    ASSERT_FALSE(failPoint->shouldFail());
+}
+
 TEST(FailPoint, FailPointBlockIfBasicTest) {
     FailPoint failPoint;
     failPoint.setMode(FailPoint::nTimes, 1, BSON("skip" << true));

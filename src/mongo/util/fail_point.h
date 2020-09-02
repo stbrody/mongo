@@ -487,7 +487,11 @@ public:
         return _initialTimesEntered;
     }
 
+    // Disables the FP early.  If called, then the destructor of the block becomes a no-op.
+    void disable();
+
 private:
+    bool disabled = false;
     std::string _failPointName;
     FailPoint* _failPoint;
     FailPoint::EntryCountT _initialTimesEntered;
