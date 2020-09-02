@@ -202,10 +202,14 @@ public:
      */
     static StatusWith<ModeOptions> parseBSON(const BSONObj& obj);
 
-    FailPoint();
+    explicit FailPoint(std::string name);
 
     FailPoint(const FailPoint&) = delete;
     FailPoint& operator=(const FailPoint&) = delete;
+
+    const std::string& getName() {
+        return _name;
+    }
 
     /**
      * Returns true if fail point is active.
@@ -423,6 +427,8 @@ private:
     AtomicWord<int> _timesOrPeriod{0};
     BSONObj _data;
 
+    const std::string _name;
+
     // protects _mode, _timesOrPeriod, _data
     mutable Mutex _modMutex = MONGO_MAKE_LATCH("FailPoint::_modMutex");
 };
@@ -470,6 +476,8 @@ class FailPointEnableBlock {
 public:
     explicit FailPointEnableBlock(std::string failPointName);
     FailPointEnableBlock(std::string failPointName, BSONObj data);
+    explicit FailPointEnableBlock(FailPoint* failPoint);
+    explicit FailPointEnableBlock(FailPoint* failPoint, BSONObj data);
     ~FailPointEnableBlock();
 
     // Const access to the underlying FailPoint
@@ -492,8 +500,7 @@ public:
 
 private:
     bool disabled = false;
-    std::string _failPointName;
-    FailPoint* _failPoint;
+    FailPoint* const _failPoint;
     FailPoint::EntryCountT _initialTimesEntered;
 };
 
@@ -522,7 +529,7 @@ FailPointRegistry& globalFailPointRegistry();
  * Never use in header files, only .cpp files.
  */
 #define MONGO_FAIL_POINT_DEFINE(fp) \
-    ::mongo::FailPoint fp;          \
+    ::mongo::FailPoint fp(#fp);     \
     ::mongo::FailPointRegisterer fp##failPointRegisterer(#fp, &fp);
 
 
