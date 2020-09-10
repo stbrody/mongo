@@ -701,6 +701,8 @@ private:
     friend class SharedSemiFuture;
     template <typename>
     friend class future_details::FutureImpl;
+    friend class Promise<T>;
+    friend class SharedPromise<T>;
 
     ExecutorPtr _exec;
 };
@@ -786,7 +788,7 @@ public:
         if constexpr (std::is_same<typename std::invoke_result<Func>::type, ExecutorFuture<T>>::value) {
             Future<void>::makeReady().then([this, func = std::forward<Func>(func)](){
               setFrom(func());
-            });
+            }).get();
         } else {
           setFrom(Future<void>::makeReady().then(std::forward<Func>(func)));
         }
@@ -1071,6 +1073,8 @@ public:
         invariant(!std::exchange(_haveCompleted, true));
         std::move(future).propagateResultTo(_sharedState.get());
     }
+
+    // todo duplicate whatever I do for regular Promise
 
     TEMPLATE(typename... Args)
     REQUIRES(std::is_constructible_v<T, Args...> || (std::is_void_v<T> && sizeof...(Args) == 0))
