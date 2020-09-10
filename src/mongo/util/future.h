@@ -790,6 +790,7 @@ public:
               setFrom(func());
             }).get();
         } else {
+            // todo remove the constexpr if and this case, they are redundant
           setFrom(Future<void>::makeReady().then(std::forward<Func>(func)));
         }
     }
