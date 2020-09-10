@@ -783,8 +783,16 @@ public:
     TEMPLATE(typename Func)
     REQUIRES(future_details::isCallableR<T, Func, void>)
     void setWith(Func&& func) noexcept {
-        setFrom(Future<void>::makeReady().then(std::forward<Func>(func)));
+        if constexpr (std::is_same<typename std::invoke_result<Func>::type, ExecutorFuture<T>>::value) {
+            Future<void>::makeReady().then([this, func = std::forward<Func>(func)](){
+              setFrom(func());
+            });
+        } else {
+          setFrom(Future<void>::makeReady().then(std::forward<Func>(func)));
+        }
     }
+
+
 
     /**
      * Sets the value into this Promise when the passed-in Future completes, which may have already
@@ -799,17 +807,14 @@ public:
 
     /**
      * Same as setFrom(Future) above, but takes an ExecutorFuture instead of a Future.
-     * Note that the work of emplacing into this Promise is performed when the ExecutorFuture
-     * resolves, so it's important that this Promise still be alive at that time. It is up to the
-     * caller to ensure that this Promise's lifetime outlives when the given ExecutorFuture might
-     * resolve.
+     * TODO comment on who runs the work that results from resolving this promise.
      */
     void setFrom(ExecutorFuture<T>&& future) noexcept {
-        future.then([&]() {
+        //std::move(future).then([&]() {
             setImpl([&](boost::intrusive_ptr<future_details::SharedState<T>>&& sharedState) {
                 std::move(future).propagateResultTo(sharedState.get());
             });
-        });
+        //});
     }
 
     TEMPLATE(typename... Args)
