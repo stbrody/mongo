@@ -797,6 +797,21 @@ public:
         });
     }
 
+    /**
+     * Same as setFrom(Future) above, but takes an ExecutorFuture instead of a Future.
+     * Note that the work of emplacing into this Promise is performed when the ExecutorFuture
+     * resolves, so it's important that this Promise still be alive at that time. It is up to the
+     * caller to ensure that this Promise's lifetime outlives when the given ExecutorFuture might
+     * resolve.
+     */
+    void setFrom(ExecutorFuture<T>&& future) noexcept {
+        future.then([&]() {
+            setImpl([&](boost::intrusive_ptr<future_details::SharedState<T>>&& sharedState) {
+                std::move(future).propagateResultTo(sharedState.get());
+            });
+        });
+    }
+
     TEMPLATE(typename... Args)
     REQUIRES(std::is_constructible_v<T, Args...> || (std::is_void_v<T> && sizeof...(Args) == 0))
     void emplaceValue(Args&&... args) noexcept {
