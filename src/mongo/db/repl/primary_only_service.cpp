@@ -532,7 +532,11 @@ void PrimaryOnlyService::_scheduleRun(WithLock wl, std::shared_ptr<Instance> ins
                 .thenRunOn(std::move(executor))  // Must use executor for this since scopedExecutor
                                                  // could be shut down by this point
                 .getAsync([std::weak_ptr<Instance> instanceWP = instance](Status status) {
-                    auto instanceSP = instanceWP.lock();
+                    // We capture a weak_ptr to the Instance since on shutdown getAsync() might not
+                    // get called due to the parent executor getting shut down.  In that case, if we
+                    // held a shared_ptr we'd wind up leaking the Instance since the callback lambda
+                    // will never run but will be holding onto a shared_ptr to the Instance.
+                    auto instanceSP = instanceWP.lock();  // Convert weak_ptr to shared_ptr.
                     if (!instanceSP) {
                         // Instance was destroyed before we got here.
                         return;
