@@ -531,11 +531,16 @@ void PrimaryOnlyService::_scheduleRun(WithLock wl, std::shared_ptr<Instance> ins
             instance->run(std::move(scopedExecutor))
                 .thenRunOn(std::move(executor))  // Must use executor for this since scopedExecutor
                                                  // could be shut down by this point
-                .getAsync([instance](Status status) {
+                .getAsync([std::weak_ptr<Instance> instanceWP = instance](Status status) {
+                    auto instanceSP = instanceWP.lock();
+                    if (!instanceSP) {
+                        // Instance was destroyed before we got here.
+                        return;
+                    }
                     if (status.isOK()) {
-                        instance->_completionPromise.emplaceValue();
+                        instanceSP->_completionPromise.emplaceValue();
                     } else {
-                        instance->_completionPromise.setError(status);
+                        instanceSP->_completionPromise.setError(status);
                     }
                 });
         });
