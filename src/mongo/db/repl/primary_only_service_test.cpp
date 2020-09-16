@@ -100,13 +100,12 @@ public:
               _state((State)_stateDoc["state"].Int()),
               _initialState(_state) {}
 
-        SemiFuture<void> run(
-            std::shared_ptr<executor::ScopedTaskExecutor> executor) noexcept override {
+        void run(std::shared_ptr<executor::ScopedTaskExecutor> executor) noexcept override {
             if (MONGO_unlikely(TestServiceHangDuringInitialization.shouldFail())) {
                 TestServiceHangDuringInitialization.pauseWhileSet();
             }
 
-            return SemiFuture<void>::makeReady()
+            SemiFuture<void>::makeReady()
                 .thenRunOn(**executor)
                 .then([self = shared_from_this()] {
                     self->_runOnce(State::kInitializing, State::kOne);
@@ -133,7 +132,13 @@ public:
                         TestServiceHangDuringCompletion.pauseWhileSet();
                     }
                 })
-                .semi();
+                .getAsync([self = shared_from_this()](Status status) {
+                    if (status.isOK()) {
+                        self->_completionPromise.emplaceValue();
+                    } else {
+                        self->_completionPromise.setError(status);
+                    }
+                });
         }
 
         void interrupt(Status status) override{};
@@ -151,6 +156,10 @@ public:
         State getInitialState() {
             stdx::lock_guard lk(_mutex);
             return _initialState;
+        }
+
+        SemiFuture<void> getCompletionFuture() {
+            return _completionPromise.getFuture().semi();
         }
 
     private:
@@ -192,6 +201,7 @@ public:
         BSONObj _stateDoc;
         State _state = State::kInitializing;
         const State _initialState;
+        Promise<void> _completionPromise;
         Mutex _mutex = MONGO_MAKE_LATCH("PrimaryOnlyServiceTest::TestService::_mutex");
     };
 };

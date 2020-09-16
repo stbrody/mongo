@@ -92,10 +92,6 @@ public:
 
         virtual ~Instance() = default;
 
-        SharedSemiFuture<void> getCompletionFuture() {
-            return _completionPromise.getFuture();
-        }
-
     protected:
         /**
          * This is the main function that PrimaryOnlyService implementations will need to implement,
@@ -103,8 +99,7 @@ public:
          * this Instance *must* be scheduled on 'executor'. Instances are responsible for inserting,
          * updating, and deleting their state documents as needed.
          */
-        virtual SemiFuture<void> run(
-            std::shared_ptr<executor::ScopedTaskExecutor> executor) noexcept = 0;
+        virtual void run(std::shared_ptr<executor::ScopedTaskExecutor> executor) noexcept = 0;
 
         /**
          * This is the function that is called when this running Instance needs to be interrupted.
@@ -115,9 +110,6 @@ public:
 
     private:
         bool _running = false;
-
-        // Promise that gets emplaced when the future returned by run() resolves.
-        SharedPromise<void> _completionPromise;
     };
 
     /**
