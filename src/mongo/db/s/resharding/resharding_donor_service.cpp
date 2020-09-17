@@ -48,9 +48,8 @@ DonorStateMachine::DonorStateMachine(const BSONObj& donorDoc)
                                                donorDoc)),
       _id(_donorDoc.getCommonReshardingMetadata().get_id()) {}
 
-SemiFuture<void> DonorStateMachine::run(
-    std::shared_ptr<executor::ScopedTaskExecutor> executor) noexcept {
-    return ExecutorFuture<void>(**executor)
+void DonorStateMachine::run(std::shared_ptr<executor::ScopedTaskExecutor> executor) noexcept {
+    ExecutorFuture<void>(**executor)
         .then([this] { _onInitializingCalculateMinFetchTimestampThenBeginDonating(); })
         .then([this, executor] {
             return _awaitAllRecipientsDoneApplyingThenStartMirroring(executor);
@@ -70,7 +69,7 @@ SemiFuture<void> DonorStateMachine::run(
             this->_transitionStateToError(status);
             return status;
         })
-        .semi();
+        .getAsync([]() {});
 }
 
 void DonorStateMachine::onReshardingFieldsChanges(

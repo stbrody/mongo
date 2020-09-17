@@ -73,7 +73,7 @@ public:
     public:
         explicit Instance(BSONObj stateDoc);
 
-        SemiFuture<void> run(std::shared_ptr<executor::ScopedTaskExecutor> executor) noexcept final;
+        void run(std::shared_ptr<executor::ScopedTaskExecutor> executor) noexcept final;
 
         void interrupt(Status status) override{};
 

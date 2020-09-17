@@ -364,7 +364,7 @@ ExecutorFuture<void> TenantMigrationDonorService::Instance::_sendRecipientForget
                                    RecipientForgetMigration(_stateDoc.getId()).toBSON(BSONObj()));
 }
 
-SemiFuture<void> TenantMigrationDonorService::Instance::run(
+void TenantMigrationDonorService::Instance::run(
     std::shared_ptr<executor::ScopedTaskExecutor> executor) noexcept {
     auto recipientUri =
         uassertStatusOK(MongoURI::parse(_stateDoc.getRecipientConnectionString().toString()));
@@ -375,7 +375,7 @@ SemiFuture<void> TenantMigrationDonorService::Instance::run(
             delete p;
         });
 
-    return ExecutorFuture<void>(**executor)
+    ExecutorFuture<void>(**executor)
         .then([this, executor] {
             // Enter "dataSync" state.
             return _insertStateDocument(executor).then([this, executor](repl::OpTime opTime) {
@@ -489,7 +489,7 @@ SemiFuture<void> TenantMigrationDonorService::Instance::run(
                   "expireAt"_attr = _stateDoc.getExpireAt());
             return status;
         })
-        .semi();
+        .getAsync([]() {});
 }
 
 }  // namespace mongo

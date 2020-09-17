@@ -222,10 +222,10 @@ void stopOnFailPoint(FailPoint* fp) {
 }
 }  // namespace
 
-SemiFuture<void> TenantMigrationRecipientService::Instance::run(
+void TenantMigrationRecipientService::Instance::run(
     std::shared_ptr<executor::ScopedTaskExecutor> executor) noexcept {
     _scopedExecutor = executor;
-    return ExecutorFuture(**executor)
+    ExecutorFuture(**executor)
         .then([this]() { return _initializeStateDoc(); })
         .then([this] {
             stopOnFailPoint(&stopAfterPersistingTenantMigrationRecipientInstanceStateDoc);
@@ -256,7 +256,7 @@ SemiFuture<void> TenantMigrationRecipientService::Instance::run(
                 return Status::OK();
             return status;
         })
-        .semi();
+        .getAsync([]() {});
 }
 
 const UUID& TenantMigrationRecipientService::Instance::getMigrationUUID() const {
