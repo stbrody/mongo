@@ -53,7 +53,9 @@ namespace {
 
 MONGO_FAIL_POINT_DEFINE(abortTenantMigrationAfterBlockingStarts);
 MONGO_FAIL_POINT_DEFINE(pauseTenantMigrationAfterBlockingStarts);
+MONGO_FAIL_POINT_DEFINE(pauseTenantMigrationAfterDataSync);
 MONGO_FAIL_POINT_DEFINE(skipSendingRecipientSyncDataCommand);
+MONGO_FAIL_POINT_DEFINE(disallowTenantMigrations);
 
 const Seconds kRecipientSyncDataTimeout(30);
 
@@ -369,6 +371,12 @@ ExecutorFuture<void> TenantMigrationDonorService::Instance::_sendRecipientForget
 
 SemiFuture<void> TenantMigrationDonorService::Instance::run(
     std::shared_ptr<executor::ScopedTaskExecutor> executor) noexcept {
+
+    // TODO SERVER-50466 Remove this failpoint and ensure that migrations resume on step-up after
+    // startup recovery.
+    if (MONGO_unlikely(disallowTenantMigrations.shouldFail())) {
+        return ExecutorFuture<void>(**executor, Status::OK()).semi();
+    }
     auto recipientUri =
         uassertStatusOK(MongoURI::parse(_stateDoc.getRecipientConnectionString().toString()));
     auto recipientTargeterRS = std::shared_ptr<RemoteCommandTargeterRS>(
@@ -395,6 +403,11 @@ SemiFuture<void> TenantMigrationDonorService::Instance::run(
             }
 
             return _sendRecipientSyncDataCommand(executor, recipientTargeterRS)
+                .then([this] {
+                    auto opCtxHolder = cc().makeOperationContext();
+                    auto opCtx = opCtxHolder.get();
+                    pauseTenantMigrationAfterDataSync.pauseWhileSet(opCtx);
+                })
                 .then([this, executor] {
                     // Enter "blocking" state.
                     auto mtab = getTenantMigrationAccessBlocker(_serviceContext,

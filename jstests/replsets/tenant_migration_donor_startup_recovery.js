@@ -1,5 +1,6 @@
 /**
- * Tests startup recovery to tenant migration donor's in memory state.
+ * Tests startup recovery to tenant migration donor's in memory state. This test randomly selects a
+ * point during the migration to simulate a failure.
  *
  * Tenant migrations are not expected to be run on servers with ephemeralForTest.
  *
@@ -10,6 +11,7 @@
 (function() {
 "use strict";
 
+load("jstests/libs/fail_point_util.js");
 load("jstests/libs/parallelTester.js");
 
 // An object that mirrors the access states for the TenantMigrationAccessBlocker.
@@ -20,16 +22,8 @@ const accessState = {
     kReject: 3
 };
 
-const donorRst = new ReplSetTest({
-    nodes: 1,
-    name: 'donor',
-    nodeOptions: {
-        setParameter: {
-            enableTenantMigrations: true,
-            "failpoint.PrimaryOnlyServiceSkipRebuildingInstances": tojson({mode: "alwaysOn"})
-        }
-    }
-});
+const donorRst = new ReplSetTest(
+    {nodes: 1, name: 'donor', nodeOptions: {setParameter: {enableTenantMigrations: true}}});
 const recipientRst = new ReplSetTest(
     {nodes: 1, name: 'recipient', nodeOptions: {setParameter: {enableTenantMigrations: true}}});
 
@@ -68,15 +62,26 @@ function startMigration(host, recipientConnString, dbPrefix) {
 
 let migrationThread =
     new Thread(startMigration, donorPrimary.host, kRecipientConnString, kDBPrefix);
+
+// Force the migration to pause after entering a randomly selected state to simulate a failure
+Random.setRandomSeed();
+const kMigrationFpNames = [
+    "pauseTenantMigrationAfterDataSync",
+    "pauseTenantMigrationAfterBlockingStarts",
+    "abortTenantMigrationAfterBlockingStarts"
+];
+const index = Random.randInt(kMigrationFpNames.length + 1);
+if (index < kMigrationFpNames.length) {
+    configureFailPoint(donorPrimary, kMigrationFpNames[index]);
+}
+
 migrationThread.start();
 sleep(Math.random() * kMaxSleepTimeMS);
 donorRst.stopSet(null /* signal */, true /*forRestart */);
 donorRst.startSet({
     restart: true,
-    setParameter: {
-        enableTenantMigrations: true,
-        "failpoint.PrimaryOnlyServiceSkipRebuildingInstances": "{'mode':'alwaysOn'}"
-    }
+    setParameter:
+        {enableTenantMigrations: true, "failpoint.disallowTenantMigrations": "{'mode':'alwaysOn'}"}
 });
 donorPrimary = donorRst.getPrimary();
 
