@@ -92,6 +92,7 @@ const auto primaryOnlyServiceStateForClient =
  * creates an OpCtx. This works because even though the node has stepped back up already, the
  * service isn't "running" until it's finished its recovery which involves waiting for all work
  * from the previous term as primary to complete.
+ * todo comment
  */
 class PrimaryOnlyServiceClientObserver final : public ServiceContext::ClientObserver {
 public:
@@ -115,8 +116,19 @@ public:
             !clientState.primaryOnlyService->isRunning()) {
             opCtx->markKilled(ErrorCodes::NotWritablePrimary);
         }
+        clientState.primaryOnlyService->registerOpCtx(opCtx);
     }
-    void onDestroyOperationContext(OperationContext* opCtx) override {}
+
+    void onDestroyOperationContext(OperationContext* opCtx) override {
+        auto client = opCtx->getClient();
+        auto clientState = primaryOnlyServiceStateForClient(client);
+        if (!clientState.primaryOnlyService) {
+            // This OpCtx/Client is not a part of a PrimaryOnlyService
+            return;
+        }
+
+        clientState.primaryOnlyService->unregisterOpCtx(opCtx);
+    }
 };
 
 ServiceContext::ConstructorActionRegisterer primaryOnlyServiceClientObserverRegisterer{
@@ -271,6 +283,19 @@ bool PrimaryOnlyService::isRunning() const {
     return _state == State::kRunning;
 }
 
+void PrimaryOnlyService::registerOpCtx(OperationContext* opCtx) {
+    stdx::lock_guard lk(_mutex);
+    auto [_, inserted] = _opCtxs.emplace(opCtx);
+    invariant(inserted);
+}
+
+void PrimaryOnlyService::unregisterOpCtx(OperationContext* opCtx) {
+    stdx::lock_guard lk(_mutex);
+    auto wasRegistered = _opCtxs.erase(opCtx);
+    invariant(wasRegistered);
+}
+
+
 void PrimaryOnlyService::startup(OperationContext* opCtx) {
     // Initialize the thread pool options with the service-specific limits on pool size.
     ThreadPool::Options threadPoolOptions(getThreadPoolLimits());
@@ -354,13 +379,18 @@ void PrimaryOnlyService::onStepDown() {
         return;
     }
 
+    if (_scopedExecutor) {
+        (*_scopedExecutor)->shutdown();
+    }
+
     for (auto& instance : _instances) {
         instance.second->interrupt({ErrorCodes::InterruptedDueToReplStateChange,
                                     "PrimaryOnlyService interrupted due to stepdown"});
     }
 
-    if (_scopedExecutor) {
-        (*_scopedExecutor)->shutdown();
+    for (auto opCtx : _opCtxs) {
+        stdx::lock_guard<Client> clientLock(*opCtx->getClient());
+        opCtx->markKilled(ErrorCodes::InterruptedDueToReplStateChange);
     }
 
     _state = State::kPaused;

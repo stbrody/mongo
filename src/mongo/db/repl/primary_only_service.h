@@ -31,6 +31,7 @@
 
 #include <boost/optional.hpp>
 #include <memory>
+#include <unordered_set>
 
 #include "mongo/base/checked_cast.h"
 #include "mongo/bson/bsonobj.h"
@@ -251,6 +252,19 @@ public:
                                         MongoProcessInterface::CurrentOpSessionsMode sessionMode,
                                         std::vector<BSONObj>* ops) noexcept;
 
+    /**
+     * Registers that this OperationContext is being used by a thread running on behalf of this
+     * PrimaryOnlyService.  Ensures that this OperationContext will be interrupted during stepDown.
+     */
+    void registerOpCtx(OperationContext* opCtx);
+
+    /**
+     * Unregisters a previously registered OperationContext. Indicates that this OpCtx is done
+     * performing work (and most likely is about to be deleted) and thus doesn't need to be
+     * interrupted at stepDown.
+     */
+    void unregisterOpCtx(OperationContext* opCtx);
+
 protected:
     /**
      * Constructs a new Instance object with the given initial state.
@@ -329,6 +343,8 @@ private:
     // Map of running instances, keyed by InstanceID.
     using InstanceMap = SimpleBSONObjUnorderedMap<std::shared_ptr<Instance>>;
     InstanceMap _instances;
+
+    std::unordered_set<OperationContext*> _opCtxs;
 };
 
 /**
