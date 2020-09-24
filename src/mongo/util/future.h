@@ -813,10 +813,17 @@ public:
      * TODO comment on who runs the work that results from resolving this promise.
      */
     void setFrom(ExecutorFuture<T>&& future) noexcept {
-        //std::move(future).then([&]() {
-            setImpl([&](boost::intrusive_ptr<future_details::SharedState<T>>&& sharedState) {
-                std::move(future).propagateResultTo(sharedState.get());
+        setImpl([&](boost::intrusive_ptr<future_details::SharedState<T>>&& sharedState) {
+            std::move(future).getAsync([&](StatusWith<T> res){
+                sharedState->setFromStatusWith(res);
             });
+        });
+
+
+        //std::move(future).then([&]() {
+           // setImpl([&](boost::intrusive_ptr<future_details::SharedState<T>>&& sharedState) {
+                //std::move(future).propagateResultTo(sharedState.get());
+           // });
         //});
     }
 

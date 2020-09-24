@@ -196,5 +196,32 @@ TEST(Executor_Future, Success_reject_recoverToFallback) {
                             ASSERT_EQ(accepter->tasksRun.load(), 1);
                         });
 }
+
+// TODO add the other setWith cases
+TEST(Executor_Future, Success_setWith_Future) {
+    FUTURE_SUCCESS_TEST([] {},
+                        [](/*Future<void>*/ auto&& fut) {
+                            auto exec = InlineQueuedCountingExecutor::make();
+                            auto pf = makePromiseFuture<int>();
+
+                            auto ef = std::move(fut).thenRunOn(exec).then([]() { return 3; });
+                            pf.promise.setWith([&] { return std::move(ef); });
+                            ASSERT_EQ(3, std::move(pf.future).get());
+                        });
+}
+
+TEST(Executor_Future, Reject_setWith_Future) {
+    FUTURE_SUCCESS_TEST([] {},
+                        [](/*Future<void>*/ auto&& fut) {
+                            auto exec = RejectingExecutor::make();
+                            auto pf = makePromiseFuture<int>();
+
+                            auto ef = std::move(fut).thenRunOn(exec).then([]() { return 3; });
+                            pf.promise.setWith([&] { return std::move(ef); });
+
+                            ASSERT_EQ(std::move(pf.future).getNoThrow(), ErrorCodes::BrokenPromise);
+                        });
+}
+
 }  // namespace
 }  // namespace mongo
