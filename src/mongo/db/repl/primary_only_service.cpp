@@ -451,7 +451,7 @@ void PrimaryOnlyService::shutdown() {
 }
 
 std::shared_ptr<PrimaryOnlyService::Instance> PrimaryOnlyService::getOrCreateInstance(
-    BSONObj initialState) {
+    OperationContext* opCtx, BSONObj initialState) {
     const auto idElem = initialState["_id"];
     uassert(4908702,
             str::stream() << "Missing _id element when adding new instance of PrimaryOnlyService \""
