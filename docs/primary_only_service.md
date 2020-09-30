@@ -39,7 +39,8 @@ single task belonging to a PrimaryOnlyService. The Instance interface includes a
 method which is provided an executor which is used to run all work that is done on behalf of the
 Instance. Implementations should not extend PrimaryOnlyService::Instance directly, instead they
 should extend PrimaryOnlyService::TypedInstance, which allows individual Instances to be looked up
-and returned as pointers to the proper Instance sub-type.
+and returned as pointers to the proper Instance sub-type. The InstanceID for an Instance is the _id
+field of its state document.
 
 
 ## Defining a new PrimaryOnlyService
@@ -50,7 +51,7 @@ collection state documents for this service are stored in, and to hand out corre
 of the proper type.  Most of the work of a new PrimaryOnlyService will be implemented in the
 PrimaryOnlyService::Instance subclass. PrimaryOnlyService::Instance subclasses will be responsible
 for running the work they need to perform to complete their task, as well as for managing and
-synchronizing their own in-memory and on-disk state. No part of the PrimaryOnlyService machinery
+synchronizing their own in-memory and on-disk state. No part of the PrimaryOnlyService **machinery**
 ever performs writes to the PrimaryOnlyService state document collections.  All writes to a given
 Instance's state document (including creating it initially and deleting it when the work has been
 completed) are performed by Instance implementations.  This means that for the majority of
@@ -59,8 +60,8 @@ state document into the state document collection, to ensure that the Instance i
 will be resumed after failover.  When an Instance is resumed after failover, it is provided the
 current version of the state document as it exists in the state document collection.  That document
 can be used to rebuild the in-memory state for this Instance so that when run() is called it knows
-what state it is in and thus what work still needs to be performed, and which has already been done
-by the previous Primary.
+what state it is in and thus what work still needs to be performed, and what work has already been
+completed by the previous Primary.
 
 
 ## Behavior during state transitions
@@ -75,7 +76,7 @@ released, until the next stepUp. This is done to reduce the likelihood of blocki
 transition process and delaying it for the entire node. This behavior does, however, guarantee that
 there will never be two Instances of the same PrimaryOnlyService with the same InstanceID running at
 the same time - you don't have to worry about Instances from a previous term as Primary still being
-around when a new term as Primary begins.
+around and running when a new term as Primary begins.
 
 ### Interrupting Instances at stepDown
 
@@ -85,8 +86,8 @@ Instance's run() method gets shut down, preventing any more work from being sche
 that Instance.  The second is that all OperationContexts created on threads (Clients) that are part
 of an Executor owned by a PrimaryOnlyService get interrupted. The third is that each individual
 Instance is explicitly interrupted, so that it can unblock any work running on threads that are
-*not* a part of an executor owned by the PrimaryOnlyService (e.g. commands that are waiting on the
-Instance to reach a certain state) that are dependent on that Instance signaling them. Currently
+*not* a part of an executor owned by the PrimaryOnlyService that are dependent on that Instance
+signaling them (e.g. commands that are waiting on the Instance to reach a certain state). Currently
 this happens via a call to an interrupt() method that each Instance must override, but in the future
 this is likely to change to signaling a CancelToken owned by the Instance instead.
 
