@@ -1989,9 +1989,10 @@ The ReplicaSetAwareService interface provides simple hooks to receive notificati
 into and out of the Primary state. By extending ReplicaSetAwareService and overriding its virtual
 methods, it is possible to get notified every time the current mongod node steps up or steps down.
 Because the onStepUp and onStepDown methods of ReplicaSetAwareServices are called inline as part of
-the stepUp and stepDown processes, while the RSTL is held, RSAS subclasses should strive to do as
-little work as possible in the bodies of these methods, and should avoid performing blocking i/o, as
-all work performed in these methods delays the replica set state transition for the entire node.
+the stepUp and stepDown processes, while the RSTL is held, ReplicaSetAwareService subclasses should
+strive to do as little work as possible in the bodies of these methods, and should avoid performing
+blocking i/o, as all work performed in these methods delays the replica set state transition for the
+entire node which can result in longer periods of write unavailability for the replica set.
 
 ## PrimaryOnlyService interface
 
