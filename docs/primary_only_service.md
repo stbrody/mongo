@@ -6,7 +6,9 @@ Primary. It is intended to be used by tasks that can be modeled as a state machi
 MongoDB document containing the current state, which newly-elected Primaries can use to rebuild the
 state of the task after failover and pick up where the old Primary left off.
 
-## Classes There are three main classes/interfaces that make up the PrimaryOnlyService machinery.
+## Classes
+
+There are three main classes/interfaces that make up the PrimaryOnlyService machinery.
 
 ### PrimaryOnlyServiceRegistry
 
